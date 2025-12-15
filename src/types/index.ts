@@ -26,6 +26,14 @@ export interface StudentStats {
   bestSubject: string;
 }
 
+export interface SubjectBreakdown {
+  [subject: string]: {
+    correct: number;
+    total: number;
+    accuracy: number;
+  };
+}
+
 export interface MatchResult {
   id: string;
   date: Date;
@@ -34,6 +42,7 @@ export interface MatchResult {
   accuracy: number;
   averageBuzzTime: number;
   subject: string;
+  subjectBreakdown?: SubjectBreakdown;
 }
 
 export interface Student {
@@ -56,6 +65,7 @@ export interface GameState {
   timeLeft: number;
   buzzTime: number | null;
   selectedAnswer: string | null;
+  subjectStats: Record<string, { correct: number; total: number }>;
 }
 
 export type UserRole = 'student' | 'coach';

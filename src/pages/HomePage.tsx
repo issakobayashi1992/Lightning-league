@@ -50,7 +50,7 @@ export const HomePage: React.FC = () => {
               Welcome, {userData?.displayName || currentUser.email}!
             </div>
             <button
-              onClick={() => navigate('/role-select')}
+              onClick={() => navigate('/game-mode-selection')}
               className="bg-yellow-500 hover:bg-orange-500 text-black text-3xl py-4 px-16 rounded-md font-black uppercase mb-4 drop-shadow-lg"
             >
               <Play className="inline mr-2" size={32} /> PLAY
@@ -83,7 +83,7 @@ export const HomePage: React.FC = () => {
         ) : (
           <>
             <button
-              onClick={() => navigate('/role-select')}
+              onClick={() => navigate('/game-mode-selection')}
               className="bg-yellow-500 hover:bg-orange-500 text-black text-3xl py-4 px-16 rounded-md font-black uppercase mb-4 drop-shadow-lg"
             >
               <Play className="inline mr-2" size={32} /> PLAY
@@ -108,4 +108,6 @@ export const HomePage: React.FC = () => {
     </div>
   );
 };
+
+
 

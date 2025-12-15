@@ -135,13 +135,55 @@ export const MatchHistoryComponent: React.FC<MatchHistoryProps> = ({ onBack }) =
                     </div>
                   </div>
                   <div className="mt-4 pt-4 border-t border-white/10">
-                    <div className="text-cyan-400 text-sm font-bold uppercase mb-2">Correct by Subject</div>
-                    <div className="flex gap-4">
-                      {Object.entries(match.correctBySubject).map(([subject, count]) => (
-                        <div key={subject} className="bg-purple-800 px-3 py-1 rounded">
-                          <span className="text-white font-bold">{subject}: {count}</span>
-                        </div>
-                      ))}
+                    <div className="text-cyan-400 text-sm font-bold uppercase mb-3">Performance by Subject</div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {(() => {
+                        // Get all subjects from both correctBySubject and totalBySubject
+                        const allSubjects = new Set([
+                          ...Object.keys(match.correctBySubject || {}),
+                          ...Object.keys(match.totalBySubject || {})
+                        ]);
+                        
+                        return Array.from(allSubjects)
+                          .map(subject => {
+                            const correctCount = match.correctBySubject[subject] || 0;
+                            const totalCount = match.totalBySubject?.[subject] || 0;
+                            const successRate = totalCount > 0 ? (correctCount / totalCount) * 100 : 0;
+                            
+                            return { subject, correctCount, totalCount, successRate };
+                          })
+                          .sort((a, b) => b.totalCount - a.totalCount)
+                          .map(({ subject, correctCount, totalCount, successRate }) => (
+                            <div key={subject} className="bg-purple-800 rounded-lg p-3 border-2 border-purple-700">
+                              <div className="flex justify-between items-center mb-2">
+                                <span className="text-white font-bold text-sm uppercase">{subject}</span>
+                                <span className={`font-bold text-lg ${
+                                  successRate >= 80 ? 'text-green-400' :
+                                  successRate >= 60 ? 'text-yellow-400' :
+                                  'text-red-400'
+                                }`}>
+                                  {successRate.toFixed(1)}%
+                                </span>
+                              </div>
+                              <div className="text-white/70 text-xs mb-2">
+                                {correctCount} correct out of {totalCount} question{totalCount !== 1 ? 's' : ''}
+                              </div>
+                              <div className="w-full bg-purple-900 rounded-full h-2">
+                                <div
+                                  className={`h-2 rounded-full ${
+                                    successRate >= 80 ? 'bg-green-500' :
+                                    successRate >= 60 ? 'bg-yellow-500' :
+                                    'bg-red-500'
+                                  }`}
+                                  style={{ width: `${Math.min(successRate, 100)}%` }}
+                                />
+                              </div>
+                            </div>
+                          ));
+                      })()}
+                      {Object.keys(match.correctBySubject || {}).length === 0 && (
+                        <div className="text-white/50 text-sm col-span-2">No subject data available</div>
+                      )}
                     </div>
                   </div>
                 </div>

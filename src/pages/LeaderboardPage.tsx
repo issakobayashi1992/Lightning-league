@@ -8,3 +8,5 @@ export const LeaderboardPage: React.FC = () => {
   return <Leaderboard onBack={() => navigate('/coach-dashboard')} />;
 };
 
+
+

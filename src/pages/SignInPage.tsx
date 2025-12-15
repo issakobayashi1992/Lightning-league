@@ -15,6 +15,8 @@ export const SignInPage: React.FC = () => {
     }
   };
 
-  return <SignIn onSuccess={handleSuccess} />;
+  return <SignIn onSuccess={handleSuccess} onBack={() => navigate('/')} />;
 };
+
+
 

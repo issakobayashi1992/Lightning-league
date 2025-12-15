@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { UserRole } from '../../types/firebase';
+import { ArrowLeft } from 'lucide-react';
 
-export const SignUp: React.FC<{ onSuccess?: () => void; onCancel?: () => void }> = ({ onSuccess, onCancel }) => {
+export const SignUp: React.FC<{ onSuccess?: () => void; onCancel?: () => void; onBack?: () => void }> = ({ onSuccess, onCancel, onBack }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -41,11 +42,19 @@ export const SignUp: React.FC<{ onSuccess?: () => void; onCancel?: () => void }>
 
   return (
     <div 
-      className="flex flex-col items-center justify-center min-h-screen px-4 bg-cover bg-center bg-no-repeat"
+      className="flex flex-col items-center justify-center min-h-screen px-4 bg-cover bg-center bg-no-repeat relative"
       style={{
         backgroundImage: 'url(/Environments/Olympus%20Arena.png)',
       }}
     >
+      {(onBack || onCancel) && (
+        <button
+          onClick={onBack || onCancel}
+          className="absolute top-4 left-4 p-2 bg-yellow-500 hover:bg-orange-500 rounded-full transition-colors z-20 shadow-lg"
+        >
+          <ArrowLeft className="w-6 h-6 text-black" />
+        </button>
+      )}
       <div className="bg-purple-900 border-4 border-cyan-400 rounded-3xl p-12 max-w-md w-full">
         <h2 className="text-4xl font-black text-white mb-8 text-center">CREATE ACCOUNT</h2>
         {error && <div className="bg-red-500 text-white p-3 rounded mb-4">{error}</div>}

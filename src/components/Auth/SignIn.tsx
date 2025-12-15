@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { ArrowLeft } from 'lucide-react';
 
-export const SignIn: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
+export const SignIn: React.FC<{ onSuccess?: () => void; onBack?: () => void }> = ({ onSuccess, onBack }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -25,11 +26,19 @@ export const SignIn: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
 
   return (
     <div 
-      className="flex flex-col items-center justify-center min-h-screen px-4 bg-cover bg-center bg-no-repeat"
+      className="flex flex-col items-center justify-center min-h-screen px-4 bg-cover bg-center bg-no-repeat relative"
       style={{
         backgroundImage: 'url(/Environments/Olympus%20Arena.png)',
       }}
     >
+      {onBack && (
+        <button
+          onClick={onBack}
+          className="absolute top-4 left-4 p-2 bg-yellow-500 hover:bg-orange-500 rounded-full transition-colors z-20 shadow-lg"
+        >
+          <ArrowLeft className="w-6 h-6 text-black" />
+        </button>
+      )}
       <div className="bg-purple-900 border-4 border-cyan-400 rounded-3xl p-12 max-w-md w-full">
         <h2 className="text-4xl font-black text-white mb-8 text-center">SIGN IN</h2>
         {error && <div className="bg-red-500 text-white p-3 rounded mb-4">{error}</div>}

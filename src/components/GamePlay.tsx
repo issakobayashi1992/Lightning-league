@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Zap, Clock, Award } from 'lucide-react';
 import { useGame } from '../context/GameContext';
 
@@ -19,44 +19,99 @@ export function GamePlay({ onBack, onGameEnd }: GamePlayProps) {
   } = useGame();
 
   const [timeLeft, setTimeLeft] = useState(settings.questionTimer);
-  const [isRevealing, setIsRevealing] = useState(false);
+  const [hesitationTimeLeft, setHesitationTimeLeft] = useState<number | null>(null);
+  const [showHesitation, setShowHesitation] = useState(false);
+  const revealIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (!gameState.hasStarted || gameState.showAnswer) return;
 
-    // Word revelation timer
+    // Word revelation timer - stop when buzzed
     if (!gameState.hasBuzzed && gameState.revealedWords < gameState.currentQuestion?.question.split(' ').length!) {
-      const interval = setInterval(() => {
+      revealIntervalRef.current = setInterval(() => {
         revealNextWord();
       }, (60 / settings.readingSpeed) * 1000);
 
-      return () => clearInterval(interval);
+      return () => {
+        if (revealIntervalRef.current) {
+          clearInterval(revealIntervalRef.current);
+          revealIntervalRef.current = null;
+        }
+      };
+    } else {
+      // Stop revealing when buzzed
+      if (revealIntervalRef.current) {
+        clearInterval(revealIntervalRef.current);
+        revealIntervalRef.current = null;
+      }
     }
-  }, [gameState.revealedWords, gameState.hasBuzzed, gameState.hasStarted, gameState.showAnswer]);
+  }, [gameState.revealedWords, gameState.hasBuzzed, gameState.hasStarted, gameState.showAnswer, revealNextWord, settings.readingSpeed, gameState.currentQuestion]);
 
   useEffect(() => {
     if (!gameState.hasStarted || gameState.showAnswer) return;
 
-    // Main timer
-    const timer = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) {
-          // Time's up - auto submit or move to next
-          if (!gameState.hasBuzzed) {
-            buzzIn();
+    // Main timer - only run when not buzzed
+    if (!gameState.hasBuzzed) {
+      const timer = setInterval(() => {
+        setTimeLeft(prev => {
+          if (prev <= 1) {
+            // Time's up - auto submit or move to next
+            if (!gameState.hasBuzzed) {
+              buzzIn();
+            }
+            return 0;
           }
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+          return prev - 1;
+        });
+      }, 1000);
 
-    return () => clearInterval(timer);
-  }, [gameState.hasStarted, gameState.showAnswer]);
+      return () => clearInterval(timer);
+    }
+  }, [gameState.hasStarted, gameState.showAnswer, gameState.hasBuzzed, buzzIn]);
+
+  // Hesitation timer - starts when buzzed in
+  useEffect(() => {
+    if (gameState.hasBuzzed && !gameState.showAnswer && hesitationTimeLeft === null) {
+      setHesitationTimeLeft(settings.hesitationTimer);
+      setShowHesitation(false);
+    }
+
+    if (hesitationTimeLeft !== null && hesitationTimeLeft > 0 && !gameState.showAnswer) {
+      const timer = setInterval(() => {
+        setHesitationTimeLeft(prev => {
+          if (prev === null) return null;
+          if (prev <= 1) {
+            // Hesitation time expired
+            setShowHesitation(true);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
+      return () => clearInterval(timer);
+    } else if (hesitationTimeLeft === 0 && !gameState.showAnswer) {
+      setShowHesitation(true);
+    }
+  }, [gameState.hasBuzzed, gameState.showAnswer, hesitationTimeLeft, settings.hesitationTimer]);
+
+  // Reset hesitation state when moving to next question
+  useEffect(() => {
+    if (!gameState.hasBuzzed) {
+      setHesitationTimeLeft(null);
+      setShowHesitation(false);
+    }
+  }, [gameState.hasBuzzed]);
 
   const handleBuzzIn = () => {
-    if (gameState.revealedWords === 0 || gameState.hasBuzzed) return;
+    // Buzzer is immediately available when question starts
+    if (gameState.hasBuzzed || !gameState.hasStarted) return;
     buzzIn();
+    // Stop word revelation immediately
+    if (revealIntervalRef.current) {
+      clearInterval(revealIntervalRef.current);
+      revealIntervalRef.current = null;
+    }
   };
 
   const handleAnswerSelect = (answer: string) => {
@@ -128,9 +183,9 @@ export function GamePlay({ onBack, onGameEnd }: GamePlayProps) {
         {/* Back button */}
         <button
           onClick={onBack}
-          className="absolute top-4 left-4 p-2 bg-white/20 hover:bg-white/30 rounded-full transition-colors z-20"
+          className="absolute top-4 left-4 p-2 bg-yellow-500 hover:bg-orange-500 rounded-full transition-colors z-20 shadow-lg"
         >
-          <ArrowLeft className="w-6 h-6 text-white" />
+          <ArrowLeft className="w-6 h-6 text-black" />
         </button>
 
         {/* Timer and Score - positioned based on mockup */}
@@ -155,12 +210,23 @@ export function GamePlay({ onBack, onGameEnd }: GamePlayProps) {
                 </span>
               </div>
               
-              <div className="text-xl leading-relaxed text-gray-800 min-h-[3rem] flex items-center mb-4">
-                {revealedText}
-                {gameState.revealedWords < words.length && (
-                  <span className="animate-pulse text-purple-600">|</span>
-                )}
-              </div>
+              {/* Hide question when buzzed in */}
+              {!gameState.hasBuzzed && (
+                <div className="text-xl leading-relaxed text-gray-800 min-h-[3rem] flex items-center mb-4">
+                  {revealedText}
+                  {gameState.revealedWords < words.length && !gameState.hasBuzzed && (
+                    <span className="animate-pulse text-purple-600">|</span>
+                  )}
+                </div>
+              )}
+
+              {/* Hesitation message */}
+              {showHesitation && gameState.hasBuzzed && !gameState.showAnswer && (
+                <div className="text-center p-6 mb-4 bg-red-100 text-red-800 border-4 border-red-500 rounded-xl">
+                  <h3 className="text-3xl font-bold">HESITATION</h3>
+                  <p className="text-lg mt-2">You took too long to answer!</p>
+                </div>
+              )}
 
               {/* Answer Choices - only show when buzzed in and not showing answer */}
               {gameState.hasBuzzed && !gameState.showAnswer && (
@@ -169,10 +235,10 @@ export function GamePlay({ onBack, onGameEnd }: GamePlayProps) {
                     <button
                       key={letter}
                       onClick={() => handleAnswerSelect(letter)}
-                      className="relative bg-gradient-to-br from-gray-50 to-gray-100 hover:from-yellow-50 hover:to-yellow-100 border-2 border-gray-300 hover:border-yellow-500 rounded-xl p-5 text-left transition-all duration-200 hover:shadow-lg hover:scale-105"
+                      className="relative bg-gradient-to-br from-gray-50 to-gray-100 hover:from-yellow-50 hover:to-yellow-100 border-2 border-gray-300 hover:border-yellow-500 rounded-xl p-5 text-left transition-all duration-200 hover:shadow-lg hover:scale-105 flex items-center"
                     >
-                      <span className="font-bold text-yellow-600 text-xl mr-3">{letter}.</span>
-                      <span className="text-gray-800 font-medium">{answer}</span>
+                      <span className="font-bold text-yellow-600 text-xl mr-3 flex-shrink-0">{letter}.</span>
+                      <span className="text-gray-800 font-medium flex-1 text-left">{answer}</span>
                     </button>
                   ))}
                 </div>
@@ -208,8 +274,8 @@ export function GamePlay({ onBack, onGameEnd }: GamePlayProps) {
           </div>
         )}
 
-        {/* Buzz In button overlay - positioned based on mockup */}
-        {!gameState.hasBuzzed && gameState.revealedWords > 0 && (
+        {/* Buzz In button overlay - immediately available when question starts */}
+        {!gameState.hasBuzzed && gameState.hasStarted && (
           <button
             onClick={handleBuzzIn}
             className="absolute bottom-1/4 left-1/2 transform -translate-x-1/2 bg-transparent hover:bg-white/10 rounded-lg p-8 transition-all z-20"

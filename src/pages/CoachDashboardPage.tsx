@@ -15,7 +15,10 @@ export const CoachDashboardPage: React.FC = () => {
       onStudentRoster={() => navigate('/student-roster')}
       onPerformanceReports={() => navigate('/performance-reports')}
       onGameSettings={() => navigate('/game-settings')}
+      onQuestionValidation={() => navigate('/question-validation')}
     />
   );
 };
+
+
 

@@ -41,6 +41,7 @@ const initialGameState: GameState = {
   timeLeft: 0,
   buzzTime: null,
   selectedAnswer: null,
+  subjectStats: {},
 };
 
 interface GameProviderProps {
@@ -95,6 +96,7 @@ export function GameProvider({ children }: GameProviderProps) {
       currentQuestion: selectedQuestions[0] || null,
       timeLeft: settings.questionTimer,
       hasStarted: true,
+      subjectStats: {},
     });
   };
 
@@ -111,7 +113,8 @@ export function GameProvider({ children }: GameProviderProps) {
   };
 
   const buzzIn = () => {
-    if (gameState.revealedWords === 0 || gameState.hasBuzzed) return;
+    // Allow buzzing immediately when question starts
+    if (gameState.hasBuzzed || !gameState.hasStarted) return;
     
     setGameState(prev => ({
       ...prev,
@@ -125,15 +128,28 @@ export function GameProvider({ children }: GameProviderProps) {
 
     const isCorrect = answer === gameState.currentQuestion.correct;
     const newScore = isCorrect ? gameState.score + 1 : gameState.score;
+    const subject = gameState.currentQuestion.subject;
 
-    setGameState(prev => ({
-      ...prev,
-      selectedAnswer: answer,
-      showAnswer: true,
-      score: newScore,
-      questionsCorrect: isCorrect ? prev.questionsCorrect + 1 : prev.questionsCorrect,
-      questionsAttempted: prev.questionsAttempted + 1,
-    }));
+    setGameState(prev => {
+      const currentSubjectStats = prev.subjectStats[subject] || { correct: 0, total: 0 };
+      const updatedSubjectStats = {
+        ...prev.subjectStats,
+        [subject]: {
+          correct: isCorrect ? currentSubjectStats.correct + 1 : currentSubjectStats.correct,
+          total: currentSubjectStats.total + 1,
+        },
+      };
+
+      return {
+        ...prev,
+        selectedAnswer: answer,
+        showAnswer: true,
+        score: newScore,
+        questionsCorrect: isCorrect ? prev.questionsCorrect + 1 : prev.questionsCorrect,
+        questionsAttempted: prev.questionsAttempted + 1,
+        subjectStats: updatedSubjectStats,
+      };
+    });
   };
 
   const nextQuestion = () => {
@@ -158,6 +174,22 @@ export function GameProvider({ children }: GameProviderProps) {
   const endGame = () => {
     if (!currentStudent) return;
 
+    // Calculate subject breakdown with accuracy percentages
+    const subjectBreakdown: Record<string, { correct: number; total: number; accuracy: number }> = {};
+    Object.entries(gameState.subjectStats).forEach(([subject, stats]) => {
+      subjectBreakdown[subject] = {
+        correct: stats.correct,
+        total: stats.total,
+        accuracy: stats.total > 0 ? (stats.correct / stats.total) * 100 : 0,
+      };
+    });
+
+    // Determine primary subject (subject with most questions)
+    const primarySubject = Object.entries(gameState.subjectStats).reduce((a, b) => 
+      a[1].total > b[1].total ? a : b, 
+      ['Mixed', { correct: 0, total: 0 }] as [string, { correct: number; total: number }]
+    )[0];
+
     const matchResult: MatchResult = {
       id: Date.now().toString(),
       date: new Date(),
@@ -165,8 +197,16 @@ export function GameProvider({ children }: GameProviderProps) {
       correctAnswers: gameState.questionsCorrect,
       accuracy: gameState.questionsAttempted > 0 ? (gameState.questionsCorrect / gameState.questionsAttempted) * 100 : 0,
       averageBuzzTime: gameState.buzzTime ? 2.5 : 0, // Simplified calculation
-      subject: 'Mixed', // Would be determined by question selection
+      subject: primarySubject,
+      subjectBreakdown,
     };
+
+    // Determine best subject (highest accuracy with at least 2 questions)
+    const bestSubject = Object.entries(subjectBreakdown)
+      .filter(([_, stats]) => stats.total >= 2)
+      .reduce((a, b) => a[1].accuracy > b[1].accuracy ? a : b, 
+        [primarySubject, subjectBreakdown[primarySubject] || { correct: 0, total: 0, accuracy: 0 }] as [string, { correct: number; total: number; accuracy: number }]
+      )[0];
 
     const updatedStudent = {
       ...currentStudent,
@@ -176,7 +216,7 @@ export function GameProvider({ children }: GameProviderProps) {
         totalGames: currentStudent.stats.totalGames + 1,
         averageAccuracy: ((currentStudent.stats.averageAccuracy * currentStudent.stats.totalGames) + matchResult.accuracy) / (currentStudent.stats.totalGames + 1),
         averageBuzzTime: matchResult.averageBuzzTime,
-        bestSubject: 'Mixed', // Simplified
+        bestSubject,
       },
     };
 

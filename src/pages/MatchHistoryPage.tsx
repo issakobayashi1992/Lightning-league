@@ -8,3 +8,5 @@ export const MatchHistoryPage: React.FC = () => {
   return <MatchHistoryComponent onBack={() => navigate('/coach-dashboard')} />;
 };
 
+
+

@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { getQuestions, createGame, createMatchHistory, updatePlayerStats, getGameSettings, getPlayer } from '../services/firestore';
 import { Question, MatchHistory } from '../types/firebase';
-import { Bolt } from 'lucide-react';
+import { Bolt, ArrowLeft } from 'lucide-react';
 
 const COLOR_THEME = {
   A_RED: '#FF416C',
@@ -40,8 +40,13 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   const [questionFullyRevealed, setQuestionFullyRevealed] = useState(false);
   const [buzzTimes, setBuzzTimes] = useState<number[]>([]);
   const [correctBySubject, setCorrectBySubject] = useState<Record<string, number>>({});
+  const [totalBySubject, setTotalBySubject] = useState<Record<string, number>>({});
   const [gameId, setGameId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [hasBuzzed, setHasBuzzed] = useState(false);
+  const [showHesitation, setShowHesitation] = useState(false);
+  const [hesitationTimer, setHesitationTimer] = useState<number | null>(null);
+  const revealIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     loadQuestions();
@@ -108,7 +113,10 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     setShuffledAnswers(shuffled);
     setQuestionFullyRevealed(false);
     setRevealedWordsCount(0);
-    setIsQuestionLive(false);
+    setIsQuestionLive(true); // Allow immediate buzzing
+    setHasBuzzed(false);
+    setShowHesitation(false);
+    setHesitationTimer(null);
     setSelectedAnswer(null);
     setShowResult(false);
     setShowCorrect(false);
@@ -118,31 +126,36 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   };
 
   useEffect(() => {
-    if (questions.length === 0 || !questions[currentQuestionIndex]) return;
+    if (questions.length === 0 || !questions[currentQuestionIndex] || hasBuzzed) return;
 
     const currentQuestion = questions[currentQuestionIndex];
     const totalWords = currentQuestion.questionText.split(' ').length;
     const msPerWord = (60 / gameSettings.wpm) * 1000;
 
-    const interval = setInterval(() => {
+    revealIntervalRef.current = setInterval(() => {
       setRevealedWordsCount((prev) => {
         if (prev < totalWords) {
           const newCount = prev + 1;
-          if (newCount === 1) {
-            setIsQuestionLive(true);
-          }
           if (newCount === totalWords) {
             setQuestionFullyRevealed(true);
           }
           return newCount;
         }
-        clearInterval(interval);
+        if (revealIntervalRef.current) {
+          clearInterval(revealIntervalRef.current);
+          revealIntervalRef.current = null;
+        }
         return prev;
       });
     }, msPerWord);
 
-    return () => clearInterval(interval);
-  }, [currentQuestionIndex, questions, gameSettings.wpm]);
+    return () => {
+      if (revealIntervalRef.current) {
+        clearInterval(revealIntervalRef.current);
+        revealIntervalRef.current = null;
+      }
+    };
+  }, [currentQuestionIndex, questions, gameSettings.wpm, hasBuzzed]);
 
   useEffect(() => {
     const shouldRunTimer = questionFullyRevealed && timer > 0;
@@ -156,11 +169,39 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   }, [timer, questionFullyRevealed]);
 
   const handleBuzz = () => {
-    if (!isQuestionLive || questionStartTime === null) return;
+    if (hasBuzzed || questionStartTime === null) return;
+    
+    // Stop word revelation immediately
+    if (revealIntervalRef.current) {
+      clearInterval(revealIntervalRef.current);
+      revealIntervalRef.current = null;
+    }
+    
     const buzzTime = (Date.now() - questionStartTime) / 1000;
     setBuzzTimes((prev) => [...prev, buzzTime]);
-    setTimer(gameSettings.hesitationTime);
+    setHasBuzzed(true);
+    setHesitationTimer(gameSettings.hesitationTime);
+    setQuestionFullyRevealed(true); // Show answers immediately
   };
+
+  // Hesitation timer
+  useEffect(() => {
+    if (hasBuzzed && hesitationTimer !== null && hesitationTimer > 0 && !showResult) {
+      const timer = setInterval(() => {
+        setHesitationTimer((prev) => {
+          if (prev === null) return null;
+          if (prev <= 1) {
+            setShowHesitation(true);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      return () => clearInterval(timer);
+    } else if (hesitationTimer === 0 && !showResult) {
+      setShowHesitation(true);
+    }
+  }, [hasBuzzed, hesitationTimer, showResult]);
 
   const handleTimeExpired = () => {
     const nextIndex = currentQuestionIndex + 1;
@@ -180,6 +221,12 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
 
     setSelectedAnswer(answer);
     setShowResult(true);
+
+    // Track total questions by subject
+    setTotalBySubject((prev) => ({
+      ...prev,
+      [currentQuestion.subjectArea]: (prev[currentQuestion.subjectArea] || 0) + 1,
+    }));
 
     if (isCorrect) {
       setPlayerScore((prev) => prev + 1);
@@ -221,6 +268,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
       total: questions.length,
       avgBuzzTime: parseFloat(avgBuzzTime.toFixed(2)),
       correctBySubject,
+      totalBySubject,
       questionIds: questions.map((q) => q.id),
       hesitationCount: 0,
     };
@@ -327,6 +375,13 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     >
       {/* Overlay interactive elements on top of background */}
       <div className="absolute inset-0 flex flex-col items-center justify-center px-4 overflow-auto">
+        {/* Back button */}
+        <button
+          onClick={onBack}
+          className="absolute top-4 left-4 p-2 bg-yellow-500 hover:bg-orange-500 rounded-full transition-colors z-20 shadow-lg"
+        >
+          <ArrowLeft className="w-6 h-6 text-black" />
+        </button>
       {showCorrect && (
         <div className="fixed inset-0 z-50 pointer-events-none flex items-center justify-center">
           <div className="relative transform border-8 border-green-500 rounded-xl p-4 bg-green-900/90 shadow-2xl animate-pulse">
@@ -374,12 +429,24 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
       </div>
 
       <div className="relative w-full max-w-4xl mx-auto mb-8">
-        <div className="bg-purple-950/90 border-2 border-cyan-400 rounded-xl p-8 text-center min-h-[160px] flex items-center justify-center">
-          <h2 className="text-3xl md:text-5xl font-black text-white">
-            {revealedText}
-            {!questionFullyRevealed && <span className="animate-pulse text-cyan-400">|</span>}
-          </h2>
-        </div>
+        {/* Hide question when buzzed */}
+        {!hasBuzzed && (
+          <div className="bg-purple-950/90 border-2 border-cyan-400 rounded-xl p-8 text-center min-h-[160px] flex items-center justify-center">
+            <h2 className="text-3xl md:text-5xl font-black text-white">
+              {revealedText}
+              {!questionFullyRevealed && <span className="animate-pulse text-cyan-400">|</span>}
+            </h2>
+          </div>
+        )}
+        
+        {/* Hesitation message */}
+        {showHesitation && hasBuzzed && !showResult && (
+          <div className="bg-red-900/90 border-4 border-red-500 rounded-xl p-8 text-center min-h-[160px] flex items-center justify-center">
+            <h2 className="text-4xl md:text-6xl font-black text-red-400 uppercase">
+              HESITATION
+            </h2>
+          </div>
+        )}
       </div>
 
       {!questionFullyRevealed ? (
@@ -413,12 +480,12 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
               >
                 <div className="bg-purple-950 border-2 border-white/20 rounded-xl flex items-center p-4">
                   <div
-                    className="absolute left-0 top-0 bottom-0 w-16 flex items-center justify-center font-black text-2xl text-black rounded-l-xl"
+                    className="absolute left-0 top-0 bottom-0 w-16 flex items-center justify-center font-black text-2xl text-black rounded-l-xl flex-shrink-0"
                     style={{ backgroundColor: colors[idx] }}
                   >
                     {labels[idx]}
                   </div>
-                  <span className="ml-20 text-xl font-bold text-white">{answer}</span>
+                  <span className="ml-20 text-xl font-bold text-white flex-1 text-left">{answer}</span>
                 </div>
               </button>
             );

@@ -76,9 +76,9 @@ export function StudentConfig({ onBack, onStartGame }: StudentConfigProps) {
         <div className="flex items-center mb-6">
           <button
             onClick={onBack}
-            className="mr-3 p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors"
+            className="mr-3 p-2 bg-yellow-500 hover:bg-orange-500 rounded-full transition-colors shadow-lg"
           >
-            <ArrowLeft className="w-5 h-5" />
+            <ArrowLeft className="w-5 h-5 text-black" />
           </button>
           <div className="flex items-center space-x-3">
             <img 

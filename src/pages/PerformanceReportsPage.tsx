@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Trophy } from 'lucide-react';
+import { Trophy, ArrowLeft } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getPlayersByTeam } from '../services/firestore';
 
@@ -37,6 +37,13 @@ export const PerformanceReportsPage: React.FC = () => {
     >
       {/* Overlay interactive elements on top of background */}
       <div className="absolute inset-0 flex flex-col items-center justify-center px-4 overflow-auto">
+        {/* Back button */}
+        <button
+          onClick={() => navigate('/coach-dashboard')}
+          className="absolute top-4 left-4 p-2 bg-yellow-500 hover:bg-orange-500 rounded-full transition-colors z-20 shadow-lg"
+        >
+          <ArrowLeft className="w-6 h-6 text-black" />
+        </button>
         <div className="bg-purple-900 border-4 border-green-400 rounded-3xl p-12 max-w-4xl w-full">
           <div className="flex items-center mb-8 border-b border-green-400/30 pb-6">
             <Trophy className="text-green-400 mr-4" size={48} />
@@ -94,4 +101,6 @@ export const PerformanceReportsPage: React.FC = () => {
     </div>
   );
 };
+
+
 

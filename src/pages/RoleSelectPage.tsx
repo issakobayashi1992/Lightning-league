@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User } from 'lucide-react';
+import { User, ArrowLeft } from 'lucide-react';
 
 export const RoleSelectPage: React.FC = () => {
   const navigate = useNavigate();
@@ -25,6 +25,13 @@ export const RoleSelectPage: React.FC = () => {
     >
       {/* Overlay interactive elements on top of background */}
       <div className="absolute inset-0 flex flex-col items-center justify-center space-y-8 px-4">
+        {/* Back button */}
+        <button
+          onClick={() => navigate('/')}
+          className="absolute top-4 left-4 p-2 bg-yellow-500 hover:bg-orange-500 rounded-full transition-colors z-20 shadow-lg"
+        >
+          <ArrowLeft className="w-6 h-6 text-black" />
+        </button>
         <h2 className="text-4xl font-black text-white">SELECT PLAYER</h2>
 
         <div className="bg-purple-900 border-4 border-cyan-400 rounded-2xl p-8 max-w-md w-full">
@@ -75,11 +82,10 @@ export const RoleSelectPage: React.FC = () => {
           <User size={64} className="mx-auto mb-4 text-white group-hover:text-black" />
           <span className="text-3xl font-bold text-white group-hover:text-black">START</span>
         </button>
-        <button onClick={() => navigate('/')} className="text-white/50 hover:text-white">
-          Back
-        </button>
       </div>
     </div>
   );
 };
+
+
 

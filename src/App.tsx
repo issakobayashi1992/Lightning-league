@@ -12,8 +12,10 @@ import { MatchHistoryPage } from './pages/MatchHistoryPage';
 import { GameSettingsPage } from './pages/GameSettingsPage';
 import { StudentRosterPage } from './pages/StudentRosterPage';
 import { PerformanceReportsPage } from './pages/PerformanceReportsPage';
+import { QuestionValidationPage } from './pages/QuestionValidationPage';
 import { SignInPage } from './pages/SignInPage';
 import { SignUpPage } from './pages/SignUpPage';
+import { GameModeSelectionPage } from './pages/GameModeSelectionPage';
 
 const App = () => {
   const { loading: authLoading } = useAuth();
@@ -32,6 +34,7 @@ const App = () => {
       <Route path="/sign-in" element={<SignInPage />} />
       <Route path="/sign-up" element={<SignUpPage />} />
       <Route path="/role-select" element={<RoleSelectPage />} />
+      <Route path="/game-mode-selection" element={<GameModeSelectionPage />} />
       <Route path="/practice-mode" element={<PracticeModePage />} />
       <Route path="/question-editor" element={<QuestionEditorPage />} />
       <Route path="/coach-dashboard" element={<CoachDashboardPage />} />
@@ -41,6 +44,7 @@ const App = () => {
       <Route path="/game-settings" element={<GameSettingsPage />} />
       <Route path="/student-roster" element={<StudentRosterPage />} />
       <Route path="/performance-reports" element={<PerformanceReportsPage />} />
+      <Route path="/question-validation" element={<QuestionValidationPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

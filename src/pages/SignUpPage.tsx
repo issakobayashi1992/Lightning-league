@@ -9,7 +9,10 @@ export const SignUpPage: React.FC = () => {
     <SignUp
       onSuccess={() => navigate('/')}
       onCancel={() => navigate('/')}
+      onBack={() => navigate('/')}
     />
   );
 };
+
+
 

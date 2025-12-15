@@ -22,6 +22,7 @@ export const QuestionEditor: React.FC<QuestionEditorProps> = ({ onBack }) => {
     subjectArea: '',
     minYear: '',
     maxYear: '',
+    validationStatus: '' as '' | 'pending' | 'approved' | 'flagged' | 'rejected',
   });
 
   useEffect(() => {
@@ -61,6 +62,9 @@ export const QuestionEditor: React.FC<QuestionEditorProps> = ({ onBack }) => {
     if (filters.maxYear) {
       filtered = filtered.filter((q) => q.importYear <= parseInt(filters.maxYear));
     }
+    if (filters.validationStatus) {
+      filtered = filtered.filter((q) => q.validationStatus === filters.validationStatus);
+    }
 
     setFilteredQuestions(filtered);
   };
@@ -84,6 +88,38 @@ export const QuestionEditor: React.FC<QuestionEditorProps> = ({ onBack }) => {
     } catch (error) {
       console.error('Error deleting question:', error);
       alert('Failed to delete question');
+    }
+  };
+
+  const handleFlagQuestion = async (questionId: string) => {
+    const reason = window.prompt('Why is this question being flagged? (e.g., "Answer doesn\'t match question", "Incorrect answer", "Needs update")');
+    if (!reason) return;
+
+    try {
+      await updateQuestion(questionId, {
+        validationStatus: 'flagged',
+        flaggedReason: reason,
+      });
+      await loadQuestions();
+      alert('Question flagged for review');
+    } catch (error) {
+      console.error('Error flagging question:', error);
+      alert('Failed to flag question');
+    }
+  };
+
+  const handleApproveQuestion = async (questionId: string) => {
+    try {
+      await updateQuestion(questionId, {
+        validationStatus: 'approved',
+        validatedBy: userData!.uid,
+        validatedAt: new Date(),
+      });
+      await loadQuestions();
+      alert('Question approved');
+    } catch (error) {
+      console.error('Error approving question:', error);
+      alert('Failed to approve question');
     }
   };
 
@@ -137,7 +173,7 @@ export const QuestionEditor: React.FC<QuestionEditorProps> = ({ onBack }) => {
               questionText: values[1] || '',
               correctAnswer: values[2] || '',
               distractors: [values[3] || '', values[4] || '', values[5] || ''],
-              level: 'MS',
+              level: 'EL',
               isPublic: true,
               createdBy: userData!.uid,
               teamId: userData?.teamId,
@@ -349,6 +385,20 @@ export const QuestionEditor: React.FC<QuestionEditorProps> = ({ onBack }) => {
                 placeholder="2025"
               />
             </div>
+            <div>
+              <label className="block text-white text-sm font-bold mb-2">Validation Status</label>
+              <select
+                value={filters.validationStatus}
+                onChange={(e) => setFilters({ ...filters, validationStatus: e.target.value as any })}
+                className="w-full bg-purple-900 text-white p-2 rounded border border-purple-500/30"
+              >
+                <option value="">All</option>
+                <option value="pending">Pending Review</option>
+                <option value="approved">Approved</option>
+                <option value="flagged">Flagged</option>
+                <option value="rejected">Rejected</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -390,6 +440,19 @@ export const QuestionEditor: React.FC<QuestionEditorProps> = ({ onBack }) => {
                   <span className="bg-cyan-600 text-white px-3 py-1 rounded font-bold text-sm">
                     {q.isPublic ? 'Public' : 'Private'}
                   </span>
+                  <span className="bg-yellow-600 text-white px-3 py-1 rounded font-bold text-sm">
+                    {q.level === 'EL' ? 'Elementary' : q.level === 'MS' ? 'Middle School' : 'High School'}
+                  </span>
+                  {q.validationStatus && (
+                    <span className={`px-3 py-1 rounded font-bold text-sm ${
+                      q.validationStatus === 'approved' ? 'bg-green-600 text-white' :
+                      q.validationStatus === 'flagged' ? 'bg-orange-600 text-white' :
+                      q.validationStatus === 'rejected' ? 'bg-red-600 text-white' :
+                      'bg-gray-600 text-white'
+                    }`}>
+                      {q.validationStatus.charAt(0).toUpperCase() + q.validationStatus.slice(1)}
+                    </span>
+                  )}
                   <span className="text-white/50 text-sm">Year: {q.importYear}</span>
                 </div>
                 <div className="flex gap-2">
@@ -399,6 +462,22 @@ export const QuestionEditor: React.FC<QuestionEditorProps> = ({ onBack }) => {
                   >
                     EDIT
                   </button>
+                  {q.validationStatus !== 'approved' && (
+                    <button
+                      onClick={() => handleApproveQuestion(q.id)}
+                      className="bg-green-600 hover:bg-green-500 text-white px-4 py-1 rounded font-bold text-sm"
+                    >
+                      APPROVE
+                    </button>
+                  )}
+                  {q.validationStatus !== 'flagged' && (
+                    <button
+                      onClick={() => handleFlagQuestion(q.id)}
+                      className="bg-orange-600 hover:bg-orange-500 text-white px-4 py-1 rounded font-bold text-sm"
+                    >
+                      FLAG
+                    </button>
+                  )}
                   <button
                     onClick={() => handleDelete(q.id)}
                     className="bg-red-600 hover:bg-red-500 text-white px-4 py-1 rounded font-bold text-sm"
@@ -408,6 +487,12 @@ export const QuestionEditor: React.FC<QuestionEditorProps> = ({ onBack }) => {
                 </div>
               </div>
               <h3 className="text-white font-bold text-lg mb-3">{q.questionText}</h3>
+              {q.flaggedReason && (
+                <div className="bg-orange-900/30 border border-orange-500 rounded p-2 mb-3">
+                  <span className="text-orange-400 text-xs font-bold">FLAGGED REASON: </span>
+                  <span className="text-white">{q.flaggedReason}</span>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-2">
                 <div className="bg-green-900/30 border border-green-500 rounded p-2">
                   <span className="text-green-400 text-xs font-bold">CORRECT: </span>
@@ -443,7 +528,7 @@ const QuestionForm: React.FC<{
     questionText: question?.questionText || '',
     correctAnswer: question?.correctAnswer || '',
     distractors: question?.distractors || ['', '', ''],
-    level: question?.level || 'MS',
+    level: question?.level || 'EL',
     isPublic: question?.isPublic ?? true,
     importYear: question?.importYear || new Date().getFullYear(),
   });
@@ -526,9 +611,10 @@ const QuestionForm: React.FC<{
             <label className="block text-cyan-400 text-sm font-bold uppercase mb-2">Level</label>
             <select
               value={formData.level}
-              onChange={(e) => setFormData({ ...formData, level: e.target.value as 'MS' | 'HS' })}
+              onChange={(e) => setFormData({ ...formData, level: e.target.value as 'EL' | 'MS' | 'HS' })}
               className="w-full bg-purple-950 text-white p-3 rounded-lg border-2 border-cyan-400/30"
             >
+              <option value="EL">Elementary</option>
               <option value="MS">Middle School</option>
               <option value="HS">High School</option>
             </select>

@@ -7,7 +7,8 @@ import {
   BarChart3, 
   Play,
   FileText,
-  Trophy
+  Trophy,
+  AlertTriangle
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getPlayersByTeam, getQuestions } from '../services/firestore';
@@ -17,6 +18,7 @@ interface CoachDashboardProps {
   onBack: () => void;
   onStartPractice: () => void;
   onQuestionEditor?: () => void;
+  onQuestionValidation?: () => void;
   onLeaderboard?: () => void;
   onMatchHistory?: () => void;
   onStudentRoster?: () => void;
@@ -28,6 +30,7 @@ export function CoachDashboard({
   onBack, 
   onStartPractice,
   onQuestionEditor,
+  onQuestionValidation,
   onLeaderboard,
   onMatchHistory,
   onStudentRoster,
@@ -78,9 +81,13 @@ export function CoachDashboard({
       style={{
         backgroundImage: 'url(/Environments/Coach%20Panel.png)',
         backgroundSize: 'cover',
-        backgroundPosition: 'center',
+        backgroundPosition: 'center top',
+        backgroundClip: 'padding-box',
       }}
     >
+      {/* Overlay to hide bottom text */}
+      <div className="absolute bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-black/40 to-transparent pointer-events-none z-10"></div>
+      
       {/* Overlay interactive elements on top of background */}
       <div className="absolute inset-0 overflow-auto">
         <div className="max-w-7xl mx-auto p-6">
@@ -88,9 +95,9 @@ export function CoachDashboard({
           <div className="flex items-center justify-center mb-8 relative">
             <button
               onClick={onBack}
-              className="absolute left-0 p-2 text-white hover:bg-white/20 rounded-full transition-colors"
+              className="absolute left-0 p-2 bg-yellow-500 hover:bg-orange-500 rounded-full transition-colors shadow-lg"
             >
-              <ArrowLeft className="w-6 h-6" />
+              <ArrowLeft className="w-6 h-6 text-black" />
             </button>
           </div>
 
@@ -116,6 +123,16 @@ export function CoachDashboard({
                   >
                     <FileText className="w-5 h-5" />
                     <span>Question Editor</span>
+                  </button>
+                )}
+
+                {onQuestionValidation && (
+                  <button
+                    onClick={onQuestionValidation}
+                    className="w-full bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white font-bold py-4 px-6 rounded-lg flex items-center justify-center space-x-2 transition-colors"
+                  >
+                    <AlertTriangle className="w-5 h-5" />
+                    <span>Validate Questions</span>
                   </button>
                 )}
 

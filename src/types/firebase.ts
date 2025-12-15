@@ -26,7 +26,7 @@ export interface Question {
   questionText: string;
   correctAnswer: string;
   distractors: string[];
-  level: 'MS' | 'HS';
+  level: 'EL' | 'MS' | 'HS'; // Elementary, Middle School, High School
   isPublic: boolean;
   createdBy: string; // coachId
   teamId?: string; // if private, tied to team
@@ -34,6 +34,10 @@ export interface Question {
   importYear: number;
   createdAt: Date;
   updatedAt: Date;
+  validationStatus?: 'pending' | 'approved' | 'flagged' | 'rejected'; // For quality control
+  flaggedReason?: string; // Reason why question was flagged
+  validatedBy?: string; // User ID who validated the question
+  validatedAt?: Date; // When question was validated
 }
 
 export interface Player {
@@ -71,6 +75,7 @@ export interface MatchHistory {
   total: number;
   avgBuzzTime: number;
   correctBySubject: Record<string, number>;
+  totalBySubject?: Record<string, number>;
   questionIds: string[];
   startedAt: Date;
   completedAt: Date;
@@ -107,6 +112,10 @@ export interface MatchState {
   revealedWordsCount: number;
   questionFullyRevealed: boolean;
 }
+
+
+
+
 
 
 

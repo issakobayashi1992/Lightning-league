@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowLeft, Trophy, Target, Clock, Star } from 'lucide-react';
+import { ArrowLeft, Trophy, Target, Clock, Star, BookOpen } from 'lucide-react';
 import { useGame } from '../context/GameContext';
 
 interface GameResultsProps {
@@ -40,9 +40,9 @@ export function GameResults({ onBack, onPlayAgain }: GameResultsProps) {
         <div className="flex items-center mb-6">
           <button
             onClick={onBack}
-            className="mr-3 p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors"
+            className="mr-3 p-2 bg-yellow-500 hover:bg-orange-500 rounded-full transition-colors shadow-lg"
           >
-            <ArrowLeft className="w-5 h-5" />
+            <ArrowLeft className="w-5 h-5 text-black" />
           </button>
           <h2 className="text-3xl font-bold text-gray-800">Game Results</h2>
         </div>
@@ -130,6 +130,44 @@ export function GameResults({ onBack, onPlayAgain }: GameResultsProps) {
             Back to Menu
           </button>
         </div>
+
+        {/* Subject Breakdown */}
+        {gameState.subjectStats && Object.keys(gameState.subjectStats).length > 0 && (
+          <div className="mt-8 pt-6 border-t border-gray-200">
+            <div className="flex items-center mb-4">
+              <BookOpen className="w-5 h-5 text-purple-600 mr-2" />
+              <h4 className="text-lg font-semibold text-gray-800">Performance by Subject</h4>
+            </div>
+            <div className="space-y-3">
+              {Object.entries(gameState.subjectStats)
+                .sort((a, b) => b[1].total - a[1].total)
+                .map(([subject, stats]) => {
+                  const subjectAccuracy = stats.total > 0 ? Math.round((stats.correct / stats.total) * 100) : 0;
+                  return (
+                    <div key={subject} className="bg-gradient-to-r from-gray-50 to-gray-100 rounded-lg p-4 border-2 border-gray-200">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="font-bold text-gray-800 text-lg">{subject}</span>
+                        <span className="font-semibold text-purple-600">{subjectAccuracy}%</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm text-gray-600">
+                        <span>{stats.correct} correct out of {stats.total} questions</span>
+                        <div className="w-32 bg-gray-200 rounded-full h-2">
+                          <div
+                            className={`h-2 rounded-full ${
+                              subjectAccuracy >= 80 ? 'bg-green-500' :
+                              subjectAccuracy >= 60 ? 'bg-yellow-500' :
+                              'bg-red-500'
+                            }`}
+                            style={{ width: `${Math.min(subjectAccuracy, 100)}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        )}
 
         {/* Recent Performance */}
         {currentStudent && currentStudent.stats.matchHistory.length > 0 && (
