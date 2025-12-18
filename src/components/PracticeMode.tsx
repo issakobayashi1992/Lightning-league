@@ -78,9 +78,18 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
         return;
       }
 
+      // Shuffle questions but keep each question object intact with its answers
+      // This ensures questions and their answers stay locked together
       const shuffled = [...allQuestions].sort(() => Math.random() - 0.5);
       const selected = shuffled.slice(0, Math.min(numQuestions, allQuestions.length));
-      setQuestions(selected);
+      // Verify each question has its correctAnswer and distractors properly set
+      const validatedQuestions = selected.map(q => {
+        if (!q.correctAnswer || !q.distractors || q.distractors.length === 0) {
+          console.warn(`Question ${q.id} is missing answer data`);
+        }
+        return q;
+      });
+      setQuestions(validatedQuestions);
 
       if (selected.length > 0 && userData) {
         // Create game record
@@ -107,6 +116,8 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     if (!questions[currentQuestionIndex]) return;
 
     const currentQuestion = questions[currentQuestionIndex];
+    // Shuffle answers but keep them tied to this specific question object
+    // Use the question's ID to ensure we're always using the correct question's answers
     const shuffled = [currentQuestion.correctAnswer, ...currentQuestion.distractors].sort(
       () => Math.random() - 0.5
     );
@@ -182,6 +193,8 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     setHasBuzzed(true);
     setHesitationTimer(gameSettings.hesitationTime);
     setQuestionFullyRevealed(true); // Show answers immediately
+    // Stop the main timer when buzzed
+    setTimer(0);
   };
 
   // Hesitation timer
@@ -319,7 +332,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
       <div
         className="min-h-screen w-full relative bg-cover bg-center bg-no-repeat flex items-center justify-center"
         style={{
-          backgroundImage: 'url(/Environments/Training%20Grounds.png)',
+          backgroundImage: 'url(/Environments/Olympus Arena.png)',
           backgroundSize: 'cover',
           backgroundPosition: 'center',
         }}
@@ -334,7 +347,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
       <div
         className="min-h-screen w-full relative bg-cover bg-center bg-no-repeat"
         style={{
-          backgroundImage: 'url(/Environments/Training%20Grounds.png)',
+          backgroundImage: 'url(/Environments/Olympus Arena.png)',
           backgroundSize: 'cover',
           backgroundPosition: 'center',
         }}
@@ -368,7 +381,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     <div
       className="min-h-screen w-full relative bg-cover bg-center bg-no-repeat"
       style={{
-        backgroundImage: 'url(/Environments/Training Grounds.png)',
+        backgroundImage: 'url(/Environments/Olympus Arena.png)',
         backgroundSize: 'cover',
         backgroundPosition: 'center',
       }}
@@ -429,7 +442,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
       </div>
 
       <div className="relative w-full max-w-4xl mx-auto mb-8">
-        {/* Hide question when buzzed */}
+        {/* Hide question when buzzed - question disappears immediately */}
         {!hasBuzzed && (
           <div className="bg-purple-950/90 border-2 border-cyan-400 rounded-xl p-8 text-center min-h-[160px] flex items-center justify-center">
             <h2 className="text-3xl md:text-5xl font-black text-white">
@@ -449,7 +462,8 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
         )}
       </div>
 
-      {!questionFullyRevealed ? (
+      {/* Show buzzer button only when not buzzed and question not fully revealed */}
+      {!hasBuzzed && !questionFullyRevealed ? (
         <button
           onClick={handleBuzz}
           disabled={!isQuestionLive}
@@ -460,37 +474,41 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
           <Bolt size={80} className="text-yellow-900" fill="currentColor" />
         </button>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-4xl">
-          {shuffledAnswers.map((answer, idx) => {
-            const labels = ['A', 'B', 'C', 'D'];
-            const colors = [COLOR_THEME.A_RED, COLOR_THEME.B_BLUE, COLOR_THEME.C_GREEN, COLOR_THEME.D_YELLOW];
-            const isCorrect = answer === currentQuestion.correctAnswer;
-            const glow =
-              showResult && selectedAnswer === answer
-                ? isCorrect
-                  ? 'shadow-[0_0_40px_rgba(56,255,255,0.8)]'
-                  : 'shadow-[0_0_40px_rgba(239,68,68,0.8)]'
-                : '';
-            return (
-              <button
-                key={idx}
-                onClick={() => handleAnswer(answer)}
-                disabled={showResult}
-                className={`relative p-1 rounded-xl ${glow} hover:scale-[1.02] ${showResult ? 'opacity-50' : ''}`}
-              >
-                <div className="bg-purple-950 border-2 border-white/20 rounded-xl flex items-center p-4">
-                  <div
-                    className="absolute left-0 top-0 bottom-0 w-16 flex items-center justify-center font-black text-2xl text-black rounded-l-xl flex-shrink-0"
-                    style={{ backgroundColor: colors[idx] }}
-                  >
-                    {labels[idx]}
+        /* Show answer choices immediately when buzzed OR when question is fully revealed */
+        (hasBuzzed || questionFullyRevealed) && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-4xl">
+            {shuffledAnswers.map((answer, idx) => {
+              const labels = ['A', 'B', 'C', 'D'];
+              const colors = [COLOR_THEME.A_RED, COLOR_THEME.B_BLUE, COLOR_THEME.C_GREEN, COLOR_THEME.D_YELLOW];
+              // Ensure we're checking against the current question's correct answer
+              const isCorrect = answer === currentQuestion.correctAnswer;
+              const glow =
+                showResult && selectedAnswer === answer
+                  ? isCorrect
+                    ? 'shadow-[0_0_40px_rgba(56,255,255,0.8)]'
+                    : 'shadow-[0_0_40px_rgba(239,68,68,0.8)]'
+                  : '';
+              return (
+                <button
+                  key={`${currentQuestion.id}-${idx}-${answer}`}
+                  onClick={() => handleAnswer(answer)}
+                  disabled={showResult}
+                  className={`relative p-1 rounded-xl ${glow} hover:scale-[1.02] ${showResult ? 'opacity-50' : ''}`}
+                >
+                  <div className="bg-purple-950 border-2 border-white/20 rounded-xl flex items-center p-4">
+                    <div
+                      className="absolute left-0 top-0 bottom-0 w-16 flex items-center justify-center font-black text-2xl text-black rounded-l-xl flex-shrink-0"
+                      style={{ backgroundColor: colors[idx] }}
+                    >
+                      {labels[idx]}
+                    </div>
+                    <span className="ml-20 text-xl font-bold text-white flex-1 text-left">{answer}</span>
                   </div>
-                  <span className="ml-20 text-xl font-bold text-white flex-1 text-left">{answer}</span>
-                </div>
-              </button>
-            );
-          })}
-        </div>
+                </button>
+              );
+            })}
+          </div>
+        )
       )}
 
       {showResult && selectedAnswer !== currentQuestion.correctAnswer && (
