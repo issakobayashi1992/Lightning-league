@@ -161,12 +161,12 @@ export function GamePlay({ onBack, onGameEnd }: GamePlayProps) {
   const words = question.question.split(' ');
   const revealedText = words.slice(0, gameState.revealedWords).join(' ');
 
-  // Determine which mockup to show based on game state
-  let backgroundImage = '/UI Mockups- Example/arena.png';
+  // Determine which background image to show based on game state
+  let backgroundImage = '/Environments/Olympus%20Arena.png';
   if (!gameState.hasBuzzed && gameState.revealedWords > 0) {
-    backgroundImage = '/UI Mockups- Example/Buzz In.png';
+    backgroundImage = '/Environments/Olympus%20Arena.png';
   } else if (gameState.showAnswer) {
-    backgroundImage = '/UI Mockups- Example/Answer Screen.png';
+    backgroundImage = '/Environments/Olympus%20Arena.png';
   }
 
   return (

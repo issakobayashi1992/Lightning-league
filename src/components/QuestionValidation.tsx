@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { getQuestions, updateQuestion } from '../services/firestore';
+import { useQuestions } from '../context/QuestionsContext';
+import { updateQuestion } from '../services/firestore';
 import { Question } from '../types/firebase';
 import { AlertTriangle, CheckCircle, XCircle, ArrowLeft, Search } from 'lucide-react';
 
@@ -10,35 +11,37 @@ interface QuestionValidationProps {
 
 export const QuestionValidation: React.FC<QuestionValidationProps> = ({ onBack }) => {
   const { userData } = useAuth();
+  const { questions: contextQuestions, loading: contextLoading, refreshQuestions } = useQuestions();
   const [questions, setQuestions] = useState<Question[]>([]);
   const [filteredQuestions, setFilteredQuestions] = useState<Question[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'flagged' | 'pending' | 'approved' | 'rejected'>('flagged');
   const [searchTerm, setSearchTerm] = useState('');
 
+  // Use questions from context, filtered by coach/team
   useEffect(() => {
-    loadQuestions();
-  }, []);
+    if (!contextLoading && contextQuestions.length > 0) {
+      let filtered = contextQuestions;
+      
+      // Filter by coach if coach role
+      if (userData?.role === 'coach') {
+        filtered = filtered.filter(q => 
+          q.createdBy === userData.uid || 
+          (userData.teamId && q.teamId === userData.teamId) ||
+          q.isPublic
+        );
+      }
+      
+      setQuestions(filtered);
+      setLoading(false);
+    } else if (!contextLoading) {
+      setLoading(false);
+    }
+  }, [contextQuestions, contextLoading, userData]);
 
   useEffect(() => {
     applyFilters();
   }, [questions, filter, searchTerm]);
-
-  const loadQuestions = async () => {
-    try {
-      setLoading(true);
-      const allQuestions = await getQuestions({
-        coachId: userData?.role === 'coach' ? userData.uid : undefined,
-        teamId: userData?.teamId,
-      });
-      setQuestions(allQuestions);
-    } catch (error) {
-      console.error('Error loading questions:', error);
-      alert('Failed to load questions');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const applyFilters = () => {
     let filtered = [...questions];
@@ -67,7 +70,7 @@ export const QuestionValidation: React.FC<QuestionValidationProps> = ({ onBack }
         validatedBy: userData!.uid,
         validatedAt: new Date(),
       });
-      await loadQuestions();
+      await refreshQuestions();
     } catch (error) {
       console.error('Error approving question:', error);
       alert('Failed to approve question');
@@ -83,7 +86,7 @@ export const QuestionValidation: React.FC<QuestionValidationProps> = ({ onBack }
         validationStatus: 'rejected',
         flaggedReason: reason,
       });
-      await loadQuestions();
+      await refreshQuestions();
     } catch (error) {
       console.error('Error rejecting question:', error);
       alert('Failed to reject question');
@@ -99,7 +102,7 @@ export const QuestionValidation: React.FC<QuestionValidationProps> = ({ onBack }
         validationStatus: 'flagged',
         flaggedReason: reason,
       });
-      await loadQuestions();
+      await refreshQuestions();
     } catch (error) {
       console.error('Error flagging question:', error);
       alert('Failed to flag question');
@@ -114,7 +117,7 @@ export const QuestionValidation: React.FC<QuestionValidationProps> = ({ onBack }
         validatedBy: undefined,
         validatedAt: undefined,
       });
-      await loadQuestions();
+      await refreshQuestions();
     } catch (error) {
       console.error('Error clearing validation:', error);
       alert('Failed to clear validation');

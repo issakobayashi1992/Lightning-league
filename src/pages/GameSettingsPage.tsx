@@ -12,25 +12,38 @@ export const GameSettingsPage: React.FC = () => {
     hesitationTime: 5,
     wpm: 150,
   });
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (userData?.teamId) {
+    // Always load settings - getGameSettings will handle fallback to 'default' if teamId doesn't exist
+    if (userData !== undefined) {
       loadGameSettings();
     }
-  }, [userData]);
+  }, [userData]); // Trigger when userData becomes available (even if teamId is undefined)
 
   const loadGameSettings = async () => {
     try {
+      setLoading(true);
+      console.log('GameSettingsPage: Loading settings for teamId:', userData?.teamId || 'default');
       const settings = await getGameSettings(userData?.teamId);
+      console.log('GameSettingsPage: Loaded game settings from database:', settings);
       if (settings) {
+        // Use actual values from database, don't fall back to defaults in the UI
         setGameSettings({
-          questionTime: settings.questionTime || 10,
-          hesitationTime: settings.hesitationTime || 5,
-          wpm: settings.wpm || 150,
+          questionTime: settings.questionTime,
+          hesitationTime: settings.hesitationTime,
+          wpm: settings.wpm,
+        });
+        console.log('GameSettingsPage: Updated state with settings:', {
+          questionTime: settings.questionTime,
+          hesitationTime: settings.hesitationTime,
+          wpm: settings.wpm,
         });
       }
     } catch (error) {
       console.error('Error loading game settings:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -69,6 +82,11 @@ export const GameSettingsPage: React.FC = () => {
             <h1 className="text-4xl font-black text-white">GAME SETTINGS</h1>
           </div>
 
+          {loading ? (
+            <div className="text-center py-8">
+              <div className="text-white text-xl">Loading settings...</div>
+            </div>
+          ) : (
           <div className="space-y-6">
             <div>
               <label className="block text-cyan-400 text-sm font-bold uppercase mb-2">
@@ -136,6 +154,7 @@ export const GameSettingsPage: React.FC = () => {
               </div>
             </div>
           </div>
+          )}
 
           <div className="flex gap-4 mt-8 pt-6 border-t border-cyan-400/30">
             <button

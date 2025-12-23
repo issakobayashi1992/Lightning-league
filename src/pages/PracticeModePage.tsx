@@ -18,19 +18,28 @@ export const PracticeModePage: React.FC = () => {
   const practiceMode = searchParams.get('practiceMode') || 'Mix';
 
   useEffect(() => {
-    if (userData?.teamId) {
+    // Always load settings - getGameSettings will handle fallback to 'default' if teamId doesn't exist
+    if (userData !== undefined) {
       loadGameSettings();
     }
-  }, [userData]);
+  }, [userData]); // Trigger when userData becomes available (even if teamId is undefined)
 
   const loadGameSettings = async () => {
     try {
+      console.log('PracticeModePage: Loading settings for teamId:', userData?.teamId || 'default');
       const settings = await getGameSettings(userData?.teamId);
+      console.log('PracticeModePage: Loaded game settings from database:', settings);
       if (settings) {
+        // Use actual values from database
         setGameSettings({
-          questionTime: settings.questionTime || 10,
-          hesitationTime: settings.hesitationTime || 5,
-          wpm: settings.wpm || 150,
+          questionTime: settings.questionTime,
+          hesitationTime: settings.hesitationTime,
+          wpm: settings.wpm,
+        });
+        console.log('PracticeModePage: Updated state with settings:', {
+          questionTime: settings.questionTime,
+          hesitationTime: settings.hesitationTime,
+          wpm: settings.wpm,
         });
       }
     } catch (error) {

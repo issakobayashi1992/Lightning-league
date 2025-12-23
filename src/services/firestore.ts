@@ -13,6 +13,8 @@ import {
   serverTimestamp,
   Timestamp,
   writeBatch,
+  onSnapshot,
+  arrayUnion,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import {
@@ -23,6 +25,7 @@ import {
   MatchHistory,
   LeaderboardEntry,
   GameSettings,
+  User,
 } from '../types/firebase';
 
 // Questions Collection
@@ -134,9 +137,93 @@ export const createTeam = async (team: Omit<Team, 'id' | 'createdAt'>) => {
 export const getTeam = async (teamId: string) => {
   const teamDoc = await getDoc(doc(db, 'teams', teamId));
   if (teamDoc.exists()) {
-    return { id: teamDoc.id, ...teamDoc.data() } as Team;
+    return { id: teamDoc.id, ...teamDoc.data(), createdAt: teamDoc.data().createdAt?.toDate() || new Date() } as Team;
   }
   return null;
+};
+
+export const getTeamByCoach = async (coachId: string) => {
+  const q = query(teamsCollection, where('coachId', '==', coachId));
+  const snapshot = await getDocs(q);
+  if (snapshot.empty) {
+    return null;
+  }
+  const teamDoc = snapshot.docs[0];
+  return { id: teamDoc.id, ...teamDoc.data(), createdAt: teamDoc.data().createdAt?.toDate() || new Date() } as Team;
+};
+
+export const updateTeam = async (teamId: string, updates: Partial<Team>) => {
+  const teamRef = doc(db, 'teams', teamId);
+  await updateDoc(teamRef, updates);
+};
+
+// Generate a unique TeamID (6-character alphanumeric code)
+const generateTeamId = (): string => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = '';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+};
+
+// Create a team with a generated TeamID for a coach
+export const createTeamForCoach = async (coachId: string, teamName: string, levels?: ('EL' | 'MS' | 'HS')[]): Promise<string> => {
+  // Generate a unique TeamID
+  let teamId = generateTeamId();
+  
+  // Check if TeamID already exists (very unlikely, but just in case)
+  let teamExists = true;
+  let attempts = 0;
+  while (teamExists && attempts < 10) {
+    const existingTeam = await getTeam(teamId);
+    if (!existingTeam) {
+      teamExists = false;
+    } else {
+      teamId = generateTeamId();
+      attempts++;
+    }
+  }
+  
+  if (teamExists) {
+    throw new Error('Failed to generate unique TeamID. Please try again.');
+  }
+  
+  // Create team document with TeamID as document ID
+  const teamRef = doc(db, 'teams', teamId);
+  const teamData: any = {
+    id: teamId,
+    name: teamName,
+    coachId: coachId,
+    playerIds: [],
+    createdAt: serverTimestamp(),
+  };
+  
+  // Only include levels if provided
+  if (levels && levels.length > 0) {
+    teamData.levels = levels;
+  }
+  
+  await setDoc(teamRef, teamData);
+  
+  // Update user document with teamId
+  const userRef = doc(db, 'users', coachId);
+  await updateDoc(userRef, { teamId: teamId });
+  
+  return teamId;
+};
+
+export const createPlayer = async (player: Omit<Player, 'id' | 'createdAt'>) => {
+  const playerRef = doc(playersCollection);
+  await setDoc(playerRef, {
+    ...player,
+    createdAt: serverTimestamp(),
+  });
+  return playerRef.id;
+};
+
+export const deletePlayer = async (playerId: string) => {
+  await deleteDoc(doc(db, 'players', playerId));
 };
 
 // Players Collection
@@ -163,6 +250,56 @@ export const getPlayersByTeam = async (teamId: string) => {
 export const updatePlayerStats = async (playerId: string, stats: Partial<Player>) => {
   const playerRef = doc(db, 'players', playerId);
   await updateDoc(playerRef, stats);
+};
+
+// Allow a student to join a team by TeamID
+export const joinTeam = async (userId: string, teamId: string, displayName: string) => {
+  // Validate team exists
+  const team = await getTeam(teamId);
+  if (!team) {
+    throw new Error('Team ID not found. Please check with your coach.');
+  }
+
+  // Use batch to ensure atomicity
+  const batch = writeBatch(db);
+
+  // Update user document with teamId
+  const userRef = doc(db, 'users', userId);
+  batch.update(userRef, { teamId: teamId });
+
+  // Check if player document exists
+  const playerRef = doc(db, 'players', userId);
+  const playerDoc = await getDoc(playerRef);
+
+  if (playerDoc.exists()) {
+    // Update existing player document
+    batch.update(playerRef, { teamId: teamId });
+  } else {
+    // Create new player document
+    batch.set(playerRef, {
+      userId: userId,
+      teamId: teamId,
+      displayName: displayName,
+      gamesPlayed: 0,
+      totalScore: 0,
+      totalQuestions: 0,
+      avgBuzzTime: 0,
+      correctBySubject: {},
+      createdAt: serverTimestamp(),
+    });
+  }
+
+  // Update team's playerIds array (only if not already included)
+  const teamRef = doc(db, 'teams', teamId);
+  const currentPlayerIds = team.playerIds || [];
+  if (!currentPlayerIds.includes(userId)) {
+    batch.update(teamRef, {
+      playerIds: arrayUnion(userId),
+    });
+  }
+
+  // Commit all changes
+  await batch.commit();
 };
 
 // Games Collection
@@ -214,9 +351,100 @@ export const updateGame = async (gameId: string, updates: Partial<Game>) => {
 export const getGame = async (gameId: string) => {
   const gameDoc = await getDoc(doc(db, 'games', gameId));
   if (gameDoc.exists()) {
-    return { id: gameDoc.id, ...gameDoc.data() } as Game;
+    const data = gameDoc.data();
+    return { 
+      id: gameDoc.id, 
+      ...data,
+      startedAt: data.startedAt?.toDate() || new Date(),
+      endedAt: data.endedAt?.toDate(),
+    } as Game;
   }
   return null;
+};
+
+export const joinMatch = async (gameId: string, playerId: string) => {
+  const gameRef = doc(db, 'games', gameId);
+  const gameDoc = await getDoc(gameRef);
+  
+  if (!gameDoc.exists()) {
+    throw new Error('Match not found');
+  }
+  
+  const gameData = gameDoc.data();
+  const playerIds = gameData.playerIds || [];
+  
+  if (playerIds.includes(playerId)) {
+    throw new Error('You have already joined this match');
+  }
+  
+  if (gameData.status !== 'waiting') {
+    throw new Error('Match is not accepting new players');
+  }
+  
+  await updateDoc(gameRef, {
+    playerIds: [...playerIds, playerId],
+  });
+};
+
+export const getGamesByMatchId = async (matchId: string) => {
+  const q = query(gamesCollection, where('matchId', '==', matchId));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((doc) => {
+    const data = doc.data();
+    return {
+      id: doc.id,
+      ...data,
+      startedAt: data.startedAt?.toDate() || new Date(),
+      endedAt: data.endedAt?.toDate(),
+    };
+  }) as Game[];
+};
+
+// Users Collection
+export const usersCollection = collection(db, 'users');
+
+export const getUser = async (userId: string) => {
+  const userDoc = await getDoc(doc(db, 'users', userId));
+  if (userDoc.exists()) {
+    const data = userDoc.data();
+    return {
+      uid: userDoc.id,
+      email: data.email || '',
+      displayName: data.displayName,
+      role: data.role,
+      teamId: data.teamId,
+      createdAt: data.createdAt?.toDate() || new Date(),
+      lastActive: data.lastActive?.toDate() || new Date(),
+    } as User;
+  }
+  return null;
+};
+
+// Admin functions for user management
+export const getAllUsers = async () => {
+  const snapshot = await getDocs(usersCollection);
+  return snapshot.docs.map((doc) => {
+    const data = doc.data();
+    return {
+      uid: doc.id,
+      email: data.email || '',
+      displayName: data.displayName,
+      role: data.role,
+      teamId: data.teamId,
+      createdAt: data.createdAt?.toDate() || new Date(),
+      lastActive: data.lastActive?.toDate() || new Date(),
+    } as User;
+  });
+};
+
+export const deleteUser = async (userId: string) => {
+  // Delete user document
+  await deleteDoc(doc(db, 'users', userId));
+  // Also delete associated player document if it exists
+  const playerDoc = await getDoc(doc(db, 'players', userId));
+  if (playerDoc.exists()) {
+    await deleteDoc(doc(db, 'players', userId));
+  }
 };
 
 // Match History Collection
@@ -225,25 +453,40 @@ export const matchHistoryCollection = collection(db, 'matchHistory');
 export const createMatchHistory = async (match: Omit<MatchHistory, 'id' | 'startedAt' | 'completedAt'>) => {
   const matchRef = doc(matchHistoryCollection);
   
-  // Build document data, filtering out undefined values
-  const matchDocData: any = {
+  // Build document data - keep it simple and ensure playerId is exactly the auth uid
+  const matchDocData: Record<string, unknown> = {
     gameId: match.gameId,
-    playerId: match.playerId,
+    playerId: match.playerId, // Must match request.auth.uid exactly
     type: match.type,
     score: match.score,
     total: match.total,
     avgBuzzTime: match.avgBuzzTime,
-    correctBySubject: match.correctBySubject,
-    questionIds: match.questionIds,
-    hesitationCount: match.hesitationCount,
+    correctBySubject: match.correctBySubject || {},
+    questionIds: match.questionIds || [],
+    hesitationCount: match.hesitationCount || 0,
     startedAt: serverTimestamp(),
     completedAt: serverTimestamp(),
   };
   
-  // Only include optional fields if they're defined
+  // Only include optional fields if they're defined and not empty
   if (match.teamId !== undefined && match.teamId !== null && match.teamId !== '') {
     matchDocData.teamId = match.teamId;
   }
+  
+  // Include totalBySubject if it's defined
+  if (match.totalBySubject !== undefined && match.totalBySubject !== null) {
+    matchDocData.totalBySubject = match.totalBySubject;
+  }
+  
+  // Log the exact data being sent for debugging
+  console.log('Firestore setDoc data:', {
+    playerId: matchDocData.playerId,
+    playerIdType: typeof matchDocData.playerId,
+    gameId: matchDocData.gameId,
+    type: matchDocData.type,
+    score: matchDocData.score,
+    total: matchDocData.total,
+  });
   
   await setDoc(matchRef, matchDocData);
   return matchRef.id;
@@ -303,12 +546,28 @@ export const getTeamLeaderboard = async (teamId: string) => {
 export const settingsCollection = collection(db, 'settings');
 
 export const getGameSettings = async (teamId?: string) => {
-  const settingsRef = doc(db, 'settings', teamId || 'default');
-  const settingsDoc = await getDoc(settingsRef);
-  if (settingsDoc.exists()) {
-    return settingsDoc.data() as GameSettings;
+  // First, try to get team-specific settings
+  if (teamId) {
+    const teamSettingsRef = doc(db, 'settings', teamId);
+    const teamSettingsDoc = await getDoc(teamSettingsRef);
+    if (teamSettingsDoc.exists()) {
+      const data = teamSettingsDoc.data();
+      console.log(`Found team-specific settings for teamId: ${teamId}`, data);
+      return data as GameSettings;
+    }
   }
-  // Return default settings
+  
+  // Fallback to 'default' settings if team-specific doesn't exist
+  const defaultSettingsRef = doc(db, 'settings', 'default');
+  const defaultSettingsDoc = await getDoc(defaultSettingsRef);
+  if (defaultSettingsDoc.exists()) {
+    const data = defaultSettingsDoc.data();
+    console.log('Using default settings document', data);
+    return data as GameSettings;
+  }
+  
+  // Return hardcoded defaults only if no settings exist in database
+  console.log('No settings found in database, using hardcoded defaults');
   return {
     questionTime: 10,
     hesitationTime: 5,

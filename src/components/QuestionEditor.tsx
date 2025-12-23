@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { getQuestions, createQuestion, updateQuestion, deleteQuestion } from '../services/firestore';
+import { useQuestions } from '../context/QuestionsContext';
+import { createQuestion, updateQuestion, deleteQuestion } from '../services/firestore';
 import { Question } from '../types/firebase';
 import { Settings } from 'lucide-react';
 
@@ -10,6 +11,7 @@ interface QuestionEditorProps {
 
 export const QuestionEditor: React.FC<QuestionEditorProps> = ({ onBack }) => {
   const { userData } = useAuth();
+  const { questions: contextQuestions, loading: contextLoading, refreshQuestions } = useQuestions();
   const [questions, setQuestions] = useState<Question[]>([]);
   const [filteredQuestions, setFilteredQuestions] = useState<Question[]>([]);
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
@@ -25,30 +27,30 @@ export const QuestionEditor: React.FC<QuestionEditorProps> = ({ onBack }) => {
     validationStatus: '' as '' | 'pending' | 'approved' | 'flagged' | 'rejected',
   });
 
+  // Use questions from context, filtered by coach/team
   useEffect(() => {
-    loadQuestions();
-  }, []);
+    if (!contextLoading && contextQuestions.length > 0) {
+      let filtered = contextQuestions;
+      
+      // Filter by coach if coach role
+      if (userData?.role === 'coach') {
+        filtered = filtered.filter(q => 
+          q.createdBy === userData.uid || 
+          (userData.teamId && q.teamId === userData.teamId) ||
+          q.isPublic
+        );
+      }
+      
+      setQuestions(filtered);
+      setLoading(false);
+    } else if (!contextLoading) {
+      setLoading(false);
+    }
+  }, [contextQuestions, contextLoading, userData]);
 
   useEffect(() => {
     applyFilters();
   }, [questions, filters]);
-
-  const loadQuestions = async () => {
-    try {
-      setLoading(true);
-      const allQuestions = await getQuestions({
-        coachId: userData?.role === 'coach' ? userData.uid : undefined,
-        teamId: userData?.teamId,
-        isPublic: filters.isPublic,
-      });
-      setQuestions(allQuestions);
-    } catch (error) {
-      console.error('Error loading questions:', error);
-      alert('Failed to load questions');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const applyFilters = () => {
     let filtered = [...questions];
@@ -84,7 +86,7 @@ export const QuestionEditor: React.FC<QuestionEditorProps> = ({ onBack }) => {
 
     try {
       await deleteQuestion(questionId);
-      await loadQuestions();
+      await refreshQuestions();
     } catch (error) {
       console.error('Error deleting question:', error);
       alert('Failed to delete question');
@@ -138,7 +140,8 @@ export const QuestionEditor: React.FC<QuestionEditorProps> = ({ onBack }) => {
       }
       setShowForm(false);
       setEditingQuestion(null);
-      await loadQuestions();
+      // Refresh questions from context
+      await refreshQuestions();
     } catch (error) {
       console.error('Error saving question:', error);
       alert('Failed to save question');
@@ -215,7 +218,7 @@ export const QuestionEditor: React.FC<QuestionEditorProps> = ({ onBack }) => {
 
       setImportedQuestions([]);
       setPreviewingQuestions(false);
-      await loadQuestions();
+      await refreshQuestions();
 
       alert(
         `Import Complete!\n\n${questionCount} question${questionCount !== 1 ? 's' : ''} successfully added to database.`

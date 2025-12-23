@@ -56,6 +56,14 @@ export const HomePage: React.FC = () => {
               <Play className="inline mr-2" size={32} /> PLAY
             </button>
             <div className="flex gap-6">
+              {userData?.role === 'admin' && (
+                <button
+                  onClick={() => navigate('/admin-dashboard')}
+                  className="bg-yellow-500 hover:bg-orange-500 text-black text-xl py-2 px-8 rounded-md font-black uppercase drop-shadow-lg"
+                >
+                  <LayoutDashboard className="inline mr-2" size={24} /> ADMIN
+                </button>
+              )}
               {userData?.role === 'coach' && (
                 <button
                   onClick={() => navigate('/coach-dashboard')}
@@ -83,7 +91,7 @@ export const HomePage: React.FC = () => {
         ) : (
           <>
             <button
-              onClick={() => navigate('/game-mode-selection')}
+              onClick={() => navigate('/sign-in')}
               className="bg-yellow-500 hover:bg-orange-500 text-black text-3xl py-4 px-16 rounded-md font-black uppercase mb-4 drop-shadow-lg"
             >
               <Play className="inline mr-2" size={32} /> PLAY

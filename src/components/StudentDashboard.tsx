@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { getMatchHistoryByPlayer, getPlayer } from '../services/firestore';
+import { getMatchHistoryByPlayer, getPlayer, getTeam, joinTeam } from '../services/firestore';
 import { MatchHistory, Player } from '../types/firebase';
-import { Trophy } from 'lucide-react';
+import { Trophy, Users } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 interface StudentDashboardProps {
@@ -10,16 +11,89 @@ interface StudentDashboardProps {
 }
 
 export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onBack }) => {
-  const { userData } = useAuth();
+  const navigate = useNavigate();
+  const { userData, refreshUserData } = useAuth();
   const [matchHistory, setMatchHistory] = useState<MatchHistory[]>([]);
   const [player, setPlayer] = useState<Player | null>(null);
+  const [teamName, setTeamName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  
+  // Team joining state
+  const [teamId, setTeamId] = useState('');
+  const [checkingTeam, setCheckingTeam] = useState(false);
+  const [joiningTeam, setJoiningTeam] = useState(false);
+  const [teamJoinError, setTeamJoinError] = useState('');
+  const [foundTeamName, setFoundTeamName] = useState<string | null>(null);
 
   useEffect(() => {
     if (userData) {
       loadData();
     }
   }, [userData]);
+
+  // Check TeamID when it's 6 characters
+  useEffect(() => {
+    const checkTeamId = async () => {
+      if (teamId.trim().length === 6) {
+        setCheckingTeam(true);
+        setTeamJoinError('');
+        try {
+          const team = await getTeam(teamId.trim().toUpperCase());
+          if (team) {
+            setFoundTeamName(team.name);
+            setTeamJoinError('');
+          } else {
+            setFoundTeamName(null);
+            setTeamJoinError('Team ID not found. Please check with your coach.');
+          }
+        } catch (error) {
+          setFoundTeamName(null);
+          setTeamJoinError('Error checking Team ID. Please try again.');
+        } finally {
+          setCheckingTeam(false);
+        }
+      } else {
+        setFoundTeamName(null);
+        setTeamJoinError('');
+      }
+    };
+
+    const timeoutId = setTimeout(checkTeamId, 500); // Debounce
+    return () => clearTimeout(timeoutId);
+  }, [teamId]);
+
+  const handleJoinTeam = async () => {
+    if (!userData || !teamId.trim() || teamId.trim().length !== 6) {
+      setTeamJoinError('Please enter a valid 6-character Team ID');
+      return;
+    }
+
+    if (!foundTeamName) {
+      setTeamJoinError('Please verify the Team ID is correct');
+      return;
+    }
+
+    try {
+      setJoiningTeam(true);
+      setTeamJoinError('');
+      const joinedTeamId = teamId.trim().toUpperCase();
+      await joinTeam(userData.uid, joinedTeamId, userData.displayName);
+      
+      // Refresh user data to get updated teamId
+      await refreshUserData();
+      
+      // Reload dashboard data to reflect the team join
+      await loadData();
+      
+      // Clear the form
+      setTeamId('');
+      setFoundTeamName(null);
+    } catch (err: any) {
+      setTeamJoinError(err.message || 'Failed to join team. Please try again.');
+    } finally {
+      setJoiningTeam(false);
+    }
+  };
 
   const loadData = async () => {
     try {
@@ -30,6 +104,18 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onBack }) =>
       ]);
       setMatchHistory(historyData);
       setPlayer(playerData);
+      
+      // Load team name if teamId exists
+      if (userData.teamId) {
+        try {
+          const team = await getTeam(userData.teamId);
+          if (team) {
+            setTeamName(team.name);
+          }
+        } catch (error) {
+          console.error('Error loading team:', error);
+        }
+      }
     } catch (error) {
       console.error('Error loading dashboard data:', error);
     } finally {
@@ -80,8 +166,76 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onBack }) =>
       <div className="bg-purple-900 border-4 border-yellow-500 rounded-3xl p-12 max-w-4xl w-full">
         <div className="flex items-center mb-8 border-b border-yellow-500/30 pb-6">
           <Trophy className="text-yellow-500 mr-4" size={48} />
-          <h1 className="text-5xl font-black text-white">MY STATS</h1>
+          <div className="flex-1">
+            <h1 className="text-5xl font-black text-white">MY STATS</h1>
+            {userData?.teamId && (
+              <div className="mt-2 space-y-1">
+                <p className="text-cyan-400 text-sm">Team ID: {userData.teamId}</p>
+                {teamName && (
+                  <p className="text-cyan-400 text-sm">Team: {teamName}</p>
+                )}
+              </div>
+            )}
+          </div>
+          {player?.avatar && (
+            <div className="ml-4">
+              <img
+                src={`/Avatars/AVATAR- Transparent/${player.avatar}.png`}
+                alt={player.avatar}
+                className="w-24 h-24 drop-shadow-lg"
+              />
+            </div>
+          )}
         </div>
+
+        {/* Join Team Section - Show if student doesn't have a team */}
+        {userData?.role === 'student' && !userData?.teamId && (
+          <div className="bg-purple-950 border-2 border-cyan-400 rounded-xl p-6 mb-8">
+            <div className="flex items-center mb-4">
+              <Users className="text-cyan-400 mr-3" size={32} />
+              <h2 className="text-2xl font-black text-white">JOIN A TEAM</h2>
+            </div>
+            <p className="text-white/70 mb-4">
+              Enter your Team ID to join your coach's team. Ask your coach for the 6-character Team ID.
+            </p>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-cyan-400 text-sm font-bold uppercase mb-2">
+                  Team ID
+                </label>
+                <input
+                  type="text"
+                  value={teamId}
+                  onChange={(e) => setTeamId(e.target.value.toUpperCase())}
+                  placeholder="Enter 6-character Team ID"
+                  maxLength={6}
+                  className="w-full bg-purple-900 text-white p-4 rounded-lg border-2 border-cyan-400/30 outline-none font-mono text-center text-xl tracking-widest"
+                />
+                {checkingTeam && (
+                  <p className="text-white/50 text-sm mt-2">Checking Team ID...</p>
+                )}
+                {foundTeamName && !checkingTeam && (
+                  <div className="mt-3 p-3 bg-green-900/30 border-2 border-green-500 rounded-lg">
+                    <p className="text-green-400 font-bold text-sm uppercase mb-1">Team Found:</p>
+                    <p className="text-white font-bold text-lg">{foundTeamName}</p>
+                  </div>
+                )}
+                {teamJoinError && !checkingTeam && (
+                  <p className="text-red-400 text-sm mt-2">{teamJoinError}</p>
+                )}
+              </div>
+              
+              <button
+                onClick={handleJoinTeam}
+                disabled={joiningTeam || !foundTeamName || teamId.trim().length !== 6}
+                className="w-full bg-yellow-500 hover:bg-orange-500 text-black font-black text-xl py-4 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {joiningTeam ? 'JOINING TEAM...' : 'JOIN TEAM'}
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-3 gap-6 mb-8">
           <div className="bg-purple-950 border-2 border-cyan-400 rounded-xl p-6 text-center">
@@ -142,9 +296,17 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onBack }) =>
           </div>
         </div>
 
-        <button onClick={onBack} className="w-full bg-yellow-500 hover:bg-orange-500 text-black font-black text-2xl py-4 rounded-xl">
-          BACK TO LOBBY
-        </button>
+        <div className="flex gap-4">
+          <button 
+            onClick={() => navigate('/avatar-selection')}
+            className="flex-1 bg-cyan-500 hover:bg-cyan-600 text-white font-black text-xl py-4 rounded-xl"
+          >
+            CHANGE AVATAR
+          </button>
+          <button onClick={onBack} className="flex-1 bg-yellow-500 hover:bg-orange-500 text-black font-black text-2xl py-4 rounded-xl">
+            BACK TO LOBBY
+          </button>
+        </div>
       </div>
       </div>
     </div>
