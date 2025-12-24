@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, 
   Upload, 
@@ -8,11 +9,16 @@ import {
   Play,
   FileText,
   Trophy,
-  AlertTriangle
+  AlertTriangle,
+  Bell,
+  X
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { getPlayersByTeam, getQuestions } from '../services/firestore';
-import { Player, Question as FirestoreQuestion } from '../types/firebase';
+import { getPlayersByTeam, getQuestions, createQuestion, markNotificationAsRead } from '../services/firestore';
+import { Player, Question as FirestoreQuestion, Notification } from '../types/firebase';
+import { parseCSVQuestions } from '../utils/csvParser';
+import { onSnapshot, query, where, orderBy, limit, collection } from 'firebase/firestore';
+import { db } from '../config/firebase';
 
 interface CoachDashboardProps {
   onBack: () => void;
@@ -41,10 +47,20 @@ export function CoachDashboard({
   onTeamManagement,
   onCreateMatch,
 }: CoachDashboardProps) {
+  const navigate = useNavigate();
   const { userData, loading: authLoading } = useAuth();
   const [students, setStudents] = useState<Player[]>([]);
   const [questions, setQuestions] = useState<FirestoreQuestion[]>([]);
   const [loading, setLoading] = useState(true);
+  const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState({
+    current: 0,
+    total: 0,
+    successCount: 0,
+    errorCount: 0,
+  });
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [showNotification, setShowNotification] = useState<Notification | null>(null);
 
   const loadData = useCallback(async () => {
     if (!userData) {
@@ -99,6 +115,61 @@ export function CoachDashboard({
     }
   }, [authLoading, loadData]);
 
+  // Listen for notifications
+  useEffect(() => {
+    if (!userData) return;
+
+    const notificationsRef = collection(db, 'notifications');
+    // Query without orderBy to avoid index requirement - we'll sort in memory
+    const q = query(
+      notificationsRef,
+      where('userId', '==', userData.uid),
+      where('read', '==', false),
+      limit(50) // Get more to sort in memory
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const newNotifications = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate() || new Date(),
+      })) as Notification[];
+
+      // Sort by createdAt in memory (newest first)
+      newNotifications.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+      setNotifications(newNotifications);
+
+      // Show the most recent unread notification
+      if (newNotifications.length > 0) {
+        const latestNotification = newNotifications[0];
+        if (latestNotification.type === 'match_end') {
+          setShowNotification(latestNotification);
+        }
+      }
+    }, (error) => {
+      console.error('Error listening to notifications:', error);
+    });
+
+    return () => unsubscribe();
+  }, [userData]);
+
+  // Handle notification click - navigate to match results
+  const handleNotificationClick = async (notification: Notification) => {
+    if (notification.gameId) {
+      // Mark as read
+      await markNotificationAsRead(notification.id);
+      setShowNotification(null);
+      // Navigate to match results
+      navigate(`/match-results?gameId=${notification.gameId}`);
+    }
+  };
+
+  const handleDismissNotification = async (notification: Notification) => {
+    await markNotificationAsRead(notification.id);
+    setShowNotification(null);
+  };
+
   const avgAccuracy = students.length > 0
     ? students.reduce((sum, s) => {
         const accuracy = s.totalQuestions > 0 
@@ -107,6 +178,142 @@ export function CoachDashboard({
         return sum + accuracy;
       }, 0) / students.length
     : 0;
+
+  const handleCSVImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!userData) {
+      alert('You must be logged in to import questions.');
+      return;
+    }
+
+    setImporting(true);
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const text = e.target?.result as string;
+        if (!text || text.trim().length === 0) {
+          alert('CSV file is empty or invalid');
+          setImporting(false);
+          return;
+        }
+
+        // Parse CSV using the csvParser utility
+        const parseResult = parseCSVQuestions(text);
+
+        // Show errors if any
+        if (parseResult.errors.length > 0) {
+          const errorMessage = `Found ${parseResult.errors.length} error(s) in CSV:\n\n${parseResult.errors
+            .slice(0, 10)
+            .map((e) => `Row ${e.row}: ${e.error}`)
+            .join('\n')}${parseResult.errors.length > 10 ? `\n... and ${parseResult.errors.length - 10} more` : ''}`;
+          
+          if (parseResult.questions.length === 0) {
+            alert(errorMessage + '\n\nNo valid questions to import.');
+            setImporting(false);
+            return;
+          }
+          
+          const proceed = window.confirm(
+            errorMessage + 
+            `\n\n${parseResult.questions.length} valid question(s) found. Continue importing valid questions?`
+          );
+          
+          if (!proceed) {
+            setImporting(false);
+            return;
+          }
+        }
+
+        if (parseResult.questions.length === 0) {
+          alert('No valid questions found in CSV. Please check the format.\n\nExpected format: Question ID, Category, Subgroup, Difficulty, Level, Question Text, Answer, Distractor 1, Distractor 2, Distractor 3');
+          setImporting(false);
+          return;
+        }
+
+        // Create questions in Firestore
+        let successCount = 0;
+        let errorCount = 0;
+        const totalQuestions = parseResult.questions.length;
+
+        // Initialize progress
+        setImportProgress({
+          current: 0,
+          total: totalQuestions,
+          successCount: 0,
+          errorCount: 0,
+        });
+
+        for (let i = 0; i < parseResult.questions.length; i++) {
+          const csvQuestion = parseResult.questions[i];
+          
+          // Update progress
+          setImportProgress({
+            current: i + 1,
+            total: totalQuestions,
+            successCount,
+            errorCount,
+          });
+
+          try {
+            const questionData: Omit<FirestoreQuestion, 'id' | 'createdAt' | 'updatedAt'> = {
+              subjectArea: csvQuestion.subjectArea,
+              questionText: csvQuestion.questionText,
+              correctAnswer: csvQuestion.correctAnswer,
+              distractors: csvQuestion.distractors,
+              level: csvQuestion.level || 'EL',
+              isPublic: csvQuestion.isPublic !== undefined ? csvQuestion.isPublic : true,
+              createdBy: userData.uid,
+              teamId: csvQuestion.isPublic === false ? userData.teamId : undefined,
+              importDate: new Date(),
+              importYear: csvQuestion.importYear || new Date().getFullYear(),
+              validationStatus: csvQuestion.validationStatus || 'pending',
+            };
+
+            await createQuestion(questionData);
+            successCount++;
+          } catch (error) {
+            console.error('Error creating question:', error);
+            errorCount++;
+          }
+        }
+
+        // Final progress update
+        setImportProgress({
+          current: totalQuestions,
+          total: totalQuestions,
+          successCount,
+          errorCount,
+        });
+
+        // Refresh the questions list
+        await loadData();
+
+        // Show success message
+        if (errorCount === 0) {
+          alert(`Successfully imported ${successCount} question${successCount !== 1 ? 's' : ''}!`);
+        } else {
+          alert(`Import completed with errors:\n${successCount} question${successCount !== 1 ? 's' : ''} imported successfully\n${errorCount} question${errorCount !== 1 ? 's' : ''} failed to import`);
+        }
+      } catch (error) {
+        console.error('Error importing CSV:', error);
+        alert('Error importing CSV file: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      } finally {
+        setImporting(false);
+        // Reset the file input so the same file can be imported again
+        event.target.value = '';
+      }
+    };
+
+    reader.onerror = () => {
+      alert('Error reading file');
+      setImporting(false);
+    };
+
+    reader.readAsText(file);
+  };
 
   return (
     <div 
@@ -118,9 +325,84 @@ export function CoachDashboard({
         backgroundClip: 'padding-box',
       }}
     >
+      {/* Notification Banner */}
+      {showNotification && (
+        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 w-full max-w-2xl px-4">
+          <div className="bg-yellow-500 border-4 border-yellow-600 rounded-xl p-4 shadow-2xl flex items-center justify-between">
+            <div className="flex items-center flex-1">
+              <Bell className="text-black mr-3" size={24} />
+              <div className="flex-1">
+                <h3 className="text-black font-black text-lg">{showNotification.title}</h3>
+                <p className="text-black/80 text-sm">{showNotification.message}</p>
+              </div>
+            </div>
+            <div className="flex gap-2 ml-4">
+              {showNotification.gameId && (
+                <button
+                  onClick={() => handleNotificationClick(showNotification)}
+                  className="bg-black text-yellow-500 font-bold px-4 py-2 rounded-lg hover:bg-gray-800 transition-colors"
+                >
+                  VIEW RESULTS
+                </button>
+              )}
+              <button
+                onClick={() => handleDismissNotification(showNotification)}
+                className="bg-black/20 text-black hover:bg-black/30 rounded-lg p-2 transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Overlay to hide bottom text */}
       <div className="absolute bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-black/40 to-transparent pointer-events-none z-10"></div>
       
+      {/* Import Progress Modal */}
+      {importing && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl">
+            <h3 className="text-2xl font-black text-gray-800 mb-6 text-center">Importing Questions</h3>
+            
+            <div className="mb-4">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-sm font-semibold text-gray-700">
+                  Progress: {importProgress.current} / {importProgress.total}
+                </span>
+                <span className="text-sm font-semibold text-gray-700">
+                  {importProgress.total > 0 ? Math.round((importProgress.current / importProgress.total) * 100) : 0}%
+                </span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-4 overflow-hidden">
+                <div
+                  className="bg-gradient-to-r from-purple-500 to-purple-600 h-full transition-all duration-300 ease-out"
+                  style={{
+                    width: `${importProgress.total > 0 ? (importProgress.current / importProgress.total) * 100 : 0}%`,
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2 mb-6">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-600">Successfully imported:</span>
+                <span className="text-sm font-bold text-green-600">{importProgress.successCount}</span>
+              </div>
+              {importProgress.errorCount > 0 && (
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-gray-600">Errors:</span>
+                  <span className="text-sm font-bold text-red-600">{importProgress.errorCount}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="text-center">
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Overlay interactive elements on top of background */}
       <div className="absolute inset-0 overflow-auto">
         <div className="max-w-7xl mx-auto p-6">
@@ -199,18 +481,14 @@ export function CoachDashboard({
                   </button>
                 )}
 
-                <label className="w-full bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white font-bold py-4 px-6 rounded-lg flex items-center justify-center space-x-2 transition-colors cursor-pointer">
+                <label className={`w-full bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white font-bold py-4 px-6 rounded-lg flex items-center justify-center space-x-2 transition-colors cursor-pointer ${importing ? 'opacity-50 cursor-not-allowed' : ''}`}>
                   <Upload className="w-5 h-5" />
-                  <span>Import Questions</span>
+                  <span>{importing ? 'Importing...' : 'Import Questions'}</span>
                   <input
                     type="file"
                     accept=".csv"
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      // CSV import functionality would go here
-                      alert('CSV import feature - to be implemented');
-                    }}
+                    onChange={handleCSVImport}
+                    disabled={importing}
                     className="hidden"
                   />
                 </label>

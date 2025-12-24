@@ -19,6 +19,8 @@ import { TeamManagementPage } from './pages/TeamManagementPage';
 import { AvatarSelectionPage } from './pages/AvatarSelectionPage';
 import { MatchJoinPage } from './pages/MatchJoinPage';
 import { CreateMatchPage } from './pages/CreateMatchPage';
+import { MatchResultsPage } from './pages/MatchResultsPage';
+import { MatchPlayPage } from './pages/MatchPlayPage';
 import { AdminDashboardPage } from './pages/AdminDashboardPage';
 import { AdminUserManagementPage } from './pages/AdminUserManagementPage';
 import { AdminQuestionManagementPage } from './pages/AdminQuestionManagementPage';
@@ -48,6 +50,8 @@ const App = () => {
       <Route path="/student-dashboard" element={<StudentDashboardPage />} />
       <Route path="/avatar-selection" element={<AvatarSelectionPage />} />
       <Route path="/match-join" element={<MatchJoinPage />} />
+      <Route path="/match-play" element={<MatchPlayPage />} />
+      <Route path="/match-results" element={<MatchResultsPage />} />
       <Route path="/leaderboard" element={<LeaderboardPage />} />
       <Route path="/match-history" element={<MatchHistoryPage />} />
       <Route path="/game-settings" element={<GameSettingsPage />} />

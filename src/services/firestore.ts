@@ -26,6 +26,7 @@ import {
   LeaderboardEntry,
   GameSettings,
   User,
+  Notification,
 } from '../types/firebase';
 
 // Questions Collection
@@ -120,6 +121,34 @@ export const getQuestions = async (
     updatedAt: doc.data().updatedAt?.toDate() || new Date(),
     importDate: doc.data().importDate?.toDate() || new Date(),
   })) as Question[];
+};
+
+export const getQuestionsByIds = async (questionIds: string[]): Promise<Question[]> => {
+  if (questionIds.length === 0) return [];
+  
+  const questions: Question[] = [];
+  
+  // Fetch each question individually
+  for (const questionId of questionIds) {
+    try {
+      const questionDoc = await getDoc(doc(db, 'questions', questionId));
+      if (questionDoc.exists()) {
+        const data = questionDoc.data();
+        questions.push({
+          id: questionDoc.id,
+          ...data,
+          createdAt: data.createdAt?.toDate() || new Date(),
+          updatedAt: data.updatedAt?.toDate() || new Date(),
+          importDate: data.importDate?.toDate() || new Date(),
+        } as Question);
+      }
+    } catch (error) {
+      console.error(`Error fetching question ${questionId}:`, error);
+    }
+  }
+  
+  // Return questions in the same order as questionIds
+  return questionIds.map(id => questions.find(q => q.id === id)).filter((q): q is Question => q !== undefined);
 };
 
 // Teams Collection
@@ -311,18 +340,26 @@ export const createGame = async (game: Omit<Game, 'id' | 'startedAt'>) => {
   // Build document data, filtering out undefined values
   const gameDocData: any = {
     type: game.type,
-    playerId: game.playerId,
     questionIds: game.questionIds,
     status: game.status,
     startedAt: serverTimestamp(),
   };
   
   // Only include optional fields if they're defined
+  if (game.playerId !== undefined && game.playerId !== null && game.playerId !== '') {
+    gameDocData.playerId = game.playerId;
+  }
   if (game.teamId !== undefined && game.teamId !== null && game.teamId !== '') {
     gameDocData.teamId = game.teamId;
   }
   if (game.coachId !== undefined && game.coachId !== null && game.coachId !== '') {
     gameDocData.coachId = game.coachId;
+  }
+  if (game.playerIds !== undefined && game.playerIds !== null && Array.isArray(game.playerIds)) {
+    gameDocData.playerIds = game.playerIds;
+  }
+  if (game.matchIdCode !== undefined && game.matchIdCode !== null && game.matchIdCode !== '') {
+    gameDocData.matchIdCode = game.matchIdCode;
   }
   
   await setDoc(gameRef, gameDocData);
@@ -364,13 +401,22 @@ export const getGame = async (gameId: string) => {
 
 export const joinMatch = async (gameId: string, playerId: string) => {
   const gameRef = doc(db, 'games', gameId);
+  console.log('[DEBUG] joinMatch - Getting game document:', gameId);
   const gameDoc = await getDoc(gameRef);
   
   if (!gameDoc.exists()) {
+    console.error('[DEBUG] joinMatch - Game document does not exist');
     throw new Error('Match not found');
   }
   
   const gameData = gameDoc.data();
+  console.log('[DEBUG] joinMatch - Game data:', gameData);
+  console.log('[DEBUG] joinMatch - Game has type:', gameData.type);
+  console.log('[DEBUG] joinMatch - Game has coachId:', gameData.coachId);
+  console.log('[DEBUG] joinMatch - Game has teamId:', gameData.teamId);
+  console.log('[DEBUG] joinMatch - Game has playerId:', gameData.playerId);
+  console.log('[DEBUG] joinMatch - Game status:', gameData.status);
+  
   const playerIds = gameData.playerIds || [];
   
   if (playerIds.includes(playerId)) {
@@ -381,9 +427,12 @@ export const joinMatch = async (gameId: string, playerId: string) => {
     throw new Error('Match is not accepting new players');
   }
   
+  console.log('[DEBUG] joinMatch - Attempting updateDoc with arrayUnion');
+  // Use arrayUnion instead of spread operator to work with Firestore security rules
   await updateDoc(gameRef, {
-    playerIds: [...playerIds, playerId],
+    playerIds: arrayUnion(playerId),
   });
+  console.log('[DEBUG] joinMatch - Successfully updated');
 };
 
 export const getGamesByMatchId = async (matchId: string) => {
@@ -398,6 +447,28 @@ export const getGamesByMatchId = async (matchId: string) => {
       endedAt: data.endedAt?.toDate(),
     };
   }) as Game[];
+};
+
+export const getGameByMatchIdCode = async (matchIdCode: string) => {
+  // Query by matchIdCode only (type field may not exist in all documents)
+  // The security rules allow reading games with matchIdCode
+  const q = query(
+    gamesCollection, 
+    where('matchIdCode', '==', matchIdCode.toUpperCase())
+  );
+  const snapshot = await getDocs(q);
+  if (snapshot.empty) {
+    return null;
+  }
+  const doc = snapshot.docs[0];
+  const data = doc.data();
+  
+  return {
+    id: doc.id,
+    ...data,
+    startedAt: data.startedAt?.toDate() || new Date(),
+    endedAt: data.endedAt?.toDate(),
+  } as Game;
 };
 
 // Users Collection
@@ -449,6 +520,23 @@ export const deleteUser = async (userId: string) => {
 
 // Match History Collection
 export const matchHistoryCollection = collection(db, 'matchHistory');
+
+export const getMatchHistoriesByGameId = async (gameId: string) => {
+  const q = query(
+    collection(db, 'matchHistory'),
+    where('gameId', '==', gameId)
+  );
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((doc) => {
+    const data = doc.data();
+    return {
+      id: doc.id,
+      ...data,
+      startedAt: data.startedAt?.toDate() || new Date(),
+      completedAt: data.completedAt?.toDate() || new Date(),
+    } as MatchHistory;
+  });
+};
 
 export const createMatchHistory = async (match: Omit<MatchHistory, 'id' | 'startedAt' | 'completedAt'>) => {
   const matchRef = doc(matchHistoryCollection);
@@ -591,6 +679,68 @@ export const updateGameSettings = async (settings: GameSettings, teamId?: string
   }
   
   await setDoc(settingsRef, settingsDocData);
+};
+
+// Notifications Collection
+export const notificationsCollection = collection(db, 'notifications');
+
+export const createNotification = async (notification: Omit<Notification, 'id' | 'createdAt'>) => {
+  const notificationRef = doc(notificationsCollection);
+  
+  // Build document data, filtering out undefined values
+  const notificationDocData: any = {
+    userId: notification.userId,
+    type: notification.type,
+    title: notification.title,
+    message: notification.message,
+    read: false,
+    createdAt: serverTimestamp(),
+  };
+  
+  // Only include optional fields if they're defined
+  if (notification.gameId !== undefined && notification.gameId !== null && notification.gameId !== '') {
+    notificationDocData.gameId = notification.gameId;
+  }
+  if (notification.teamId !== undefined && notification.teamId !== null && notification.teamId !== '') {
+    notificationDocData.teamId = notification.teamId;
+  }
+  
+  await setDoc(notificationRef, notificationDocData);
+  return notificationRef.id;
+};
+
+export const getNotificationsByUser = async (userId: string, limitCount: number = 50) => {
+  const q = query(
+    notificationsCollection,
+    where('userId', '==', userId),
+    orderBy('createdAt', 'desc'),
+    limit(limitCount)
+  );
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((doc) => ({
+    id: doc.id,
+    ...doc.data(),
+    createdAt: doc.data().createdAt?.toDate() || new Date(),
+  })) as Notification[];
+};
+
+export const markNotificationAsRead = async (notificationId: string) => {
+  const notificationRef = doc(db, 'notifications', notificationId);
+  await updateDoc(notificationRef, { read: true });
+};
+
+export const markAllNotificationsAsRead = async (userId: string) => {
+  const q = query(
+    notificationsCollection,
+    where('userId', '==', userId),
+    where('read', '==', false)
+  );
+  const snapshot = await getDocs(q);
+  const batch = writeBatch(db);
+  snapshot.docs.forEach((doc) => {
+    batch.update(doc.ref, { read: true });
+  });
+  await batch.commit();
 };
 
 

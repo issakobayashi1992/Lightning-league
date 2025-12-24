@@ -70,7 +70,7 @@ export const MatchHistoryComponent: React.FC<MatchHistoryProps> = ({ onBack }) =
       }}
     >
       {/* Overlay interactive elements on top of background */}
-      <div className="absolute inset-0 flex flex-col items-center justify-center px-4 py-8 overflow-auto">
+      <div className="inset-0 flex flex-col items-center justify-center px-4 py-8 overflow-auto">
       <div className="bg-purple-900 border-4 border-green-400 rounded-3xl p-12 max-w-6xl w-full">
         <div className="flex items-center justify-between mb-8 border-b border-green-400/30 pb-6">
           <div className="flex items-center">

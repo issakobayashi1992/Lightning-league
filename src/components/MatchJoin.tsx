@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { getGame, getPlayer } from '../services/firestore';
-import { Game, Player } from '../types/firebase';
+import { getGame, getGameByMatchIdCode, getPlayer } from '../services/firestore';
 import { ArrowLeft } from 'lucide-react';
 
 interface MatchJoinProps {
@@ -30,14 +29,32 @@ export const MatchJoin: React.FC<MatchJoinProps> = ({ onJoin, onBack }) => {
       setLoading(true);
       setError(null);
 
-      // Find game by matchId (using gameId as matchId for now)
-      // In a real implementation, you'd query by matchId field
-      const game = await getGame(matchId);
+      // First try to find by matchIdCode, then fallback to gameId
+      let game = null;
+      try {
+        game = await getGameByMatchIdCode(matchId);
+      } catch (err: any) {
+        console.error('Error getting game by matchIdCode:', err);
+        // Continue to try as gameId
+      }
+      
+      // If not found by matchIdCode, try as gameId (for backwards compatibility)
+      if (!game) {
+        try {
+          game = await getGame(matchId);
+        } catch (err: any) {
+          console.error('Error getting game by gameId:', err);
+          throw err; // Re-throw if this also fails
+        }
+      }
       
       if (!game) {
-        setError('Match not found. Please check the Match ID.');
+        setError('Match not found. Please check the Match ID Code.');
         return;
       }
+
+      // Use the actual game document ID, not the matchIdCode
+      const gameId = game.id;
 
       if (game.type !== 'match') {
         setError('This is not a match game. Please check the Match ID.');
@@ -61,17 +78,42 @@ export const MatchJoin: React.FC<MatchJoinProps> = ({ onJoin, onBack }) => {
         return;
       }
 
+      // Verify team membership matches the match's team
+      if (game.teamId) {
+        if (!userData.teamId) {
+          setError('You must be on a team to join this match.');
+          return;
+        }
+        if (userData.teamId !== game.teamId) {
+          setError('You cannot join this match. This match is for a different team.');
+          return;
+        }
+      }
+
       // Verify player document exists
-      const player = await getPlayer(userData.uid);
+      let player = null;
+      try {
+        player = await getPlayer(userData.uid);
+      } catch (err: any) {
+        console.error('Error getting player document:', err);
+        throw new Error('Failed to load player profile. Please try again.');
+      }
       if (!player) {
         setError('Player profile not found. Please contact support.');
         return;
       }
 
-      // Join the match
-      onJoin(matchId);
+      // Join the match using the actual game document ID
+      console.log('[DEBUG] MatchJoin - Resolved gameId:', gameId, 'from matchIdCode:', matchId);
+      onJoin(gameId);
     } catch (err: any) {
       console.error('Error joining match:', err);
+      console.error('Error details:', {
+        code: err.code,
+        message: err.message,
+        stack: err.stack,
+        userData: userData ? { uid: userData.uid, role: userData.role, teamId: userData.teamId } : null
+      });
       setError(err.message || 'Failed to join match. Please try again.');
     } finally {
       setLoading(false);

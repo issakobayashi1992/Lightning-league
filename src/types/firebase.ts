@@ -58,13 +58,15 @@ export interface Player {
 export interface Game {
   id: string;
   type: 'practice' | 'match';
-  playerId: string;
+  playerId?: string; // Optional: required for practice games, not for match games
   teamId?: string;
   coachId?: string;
   questionIds: string[];
   startedAt: Date;
   endedAt?: Date;
   status: 'waiting' | 'active' | 'completed';
+  matchIdCode?: string; // Short code for students to join
+  playerIds?: string[]; // Array of player IDs who joined the match
 }
 
 export interface MatchHistory {
@@ -113,6 +115,18 @@ export interface MatchState {
   buzzedAt?: number;
   revealedWordsCount: number;
   questionFullyRevealed: boolean;
+}
+
+export interface Notification {
+  id: string;
+  userId: string;
+  type: 'match_end' | 'match_start' | 'team_invite' | 'other';
+  title: string;
+  message: string;
+  gameId?: string;
+  teamId?: string;
+  read: boolean;
+  createdAt: Date;
 }
 
 

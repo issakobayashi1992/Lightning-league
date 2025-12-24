@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { getMatchHistoryByPlayer, getPlayer, getTeam, joinTeam } from '../services/firestore';
-import { MatchHistory, Player } from '../types/firebase';
-import { Trophy, Users } from 'lucide-react';
+import { getMatchHistoryByPlayer, getPlayer, getTeam, joinTeam, markNotificationAsRead } from '../services/firestore';
+import { onSnapshot, query, where, orderBy, limit, collection } from 'firebase/firestore';
+import { MatchHistory, Player, Notification } from '../types/firebase';
+import { Trophy, Users, Bell, X } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { db } from '../config/firebase';
 
 interface StudentDashboardProps {
   onBack: () => void;
@@ -24,12 +26,69 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onBack }) =>
   const [joiningTeam, setJoiningTeam] = useState(false);
   const [teamJoinError, setTeamJoinError] = useState('');
   const [foundTeamName, setFoundTeamName] = useState<string | null>(null);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [showNotification, setShowNotification] = useState<Notification | null>(null);
 
   useEffect(() => {
     if (userData) {
       loadData();
     }
   }, [userData]);
+
+  // Listen for notifications
+  useEffect(() => {
+    if (!userData) return;
+
+    const notificationsRef = collection(db, 'notifications');
+    // Query without orderBy to avoid index requirement - we'll sort in memory
+    const q = query(
+      notificationsRef,
+      where('userId', '==', userData.uid),
+      where('read', '==', false),
+      limit(50) // Get more to sort in memory
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const newNotifications = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate() || new Date(),
+      })) as Notification[];
+
+      // Sort by createdAt in memory (newest first)
+      newNotifications.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+      setNotifications(newNotifications);
+
+      // Show the most recent unread notification
+      if (newNotifications.length > 0) {
+        const latestNotification = newNotifications[0];
+        if (latestNotification.type === 'match_end') {
+          setShowNotification(latestNotification);
+        }
+      }
+    }, (error) => {
+      console.error('Error listening to notifications:', error);
+    });
+
+    return () => unsubscribe();
+  }, [userData]);
+
+  // Handle notification click - navigate to match results
+  const handleNotificationClick = async (notification: Notification) => {
+    if (notification.gameId) {
+      // Mark as read
+      await markNotificationAsRead(notification.id);
+      setShowNotification(null);
+      // Navigate to match results
+      navigate(`/match-results?gameId=${notification.gameId}`);
+    }
+  };
+
+  const handleDismissNotification = async (notification: Notification) => {
+    await markNotificationAsRead(notification.id);
+    setShowNotification(null);
+  };
 
   // Check TeamID when it's 6 characters
   useEffect(() => {
@@ -163,6 +222,36 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ onBack }) =>
     >
       {/* Overlay interactive elements on top of background */}
       <div className="absolute inset-0 flex flex-col items-center justify-center px-4 py-8 overflow-auto">
+      {/* Notification Banner */}
+      {showNotification && (
+        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 w-full max-w-2xl px-4">
+          <div className="bg-yellow-500 border-4 border-yellow-600 rounded-xl p-4 shadow-2xl flex items-center justify-between">
+            <div className="flex items-center flex-1">
+              <Bell className="text-black mr-3" size={24} />
+              <div className="flex-1">
+                <h3 className="text-black font-black text-lg">{showNotification.title}</h3>
+                <p className="text-black/80 text-sm">{showNotification.message}</p>
+              </div>
+            </div>
+            <div className="flex gap-2 ml-4">
+              {showNotification.gameId && (
+                <button
+                  onClick={() => handleNotificationClick(showNotification)}
+                  className="bg-black text-yellow-500 font-bold px-4 py-2 rounded-lg hover:bg-gray-800 transition-colors"
+                >
+                  VIEW RESULTS
+                </button>
+              )}
+              <button
+                onClick={() => handleDismissNotification(showNotification)}
+                className="bg-black/20 text-black hover:bg-black/30 rounded-lg p-2 transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="bg-purple-900 border-4 border-yellow-500 rounded-3xl p-12 max-w-4xl w-full">
         <div className="flex items-center mb-8 border-b border-yellow-500/30 pb-6">
           <Trophy className="text-yellow-500 mr-4" size={48} />

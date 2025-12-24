@@ -35,7 +35,9 @@ export const MatchWaitingRoom: React.FC<MatchWaitingRoomProps> = ({
     // Join the match if not already joined
     const joinMatchIfNeeded = async () => {
       try {
+        console.log('[DEBUG] Attempting to get game:', gameId, 'User:', userData?.uid);
         const currentGame = await getGame(gameId);
+        console.log('[DEBUG] Game data:', currentGame);
         if (!currentGame) {
           setError('Match not found');
           setLoading(false);
@@ -43,11 +45,16 @@ export const MatchWaitingRoom: React.FC<MatchWaitingRoomProps> = ({
         }
 
         const playerIds = currentGame.playerIds || [];
+        console.log('[DEBUG] Current playerIds:', playerIds, 'User in list:', playerIds.includes(userData.uid));
         if (!playerIds.includes(userData.uid)) {
+          console.log('[DEBUG] Attempting to join match...');
           await joinMatch(gameId, userData.uid);
+          console.log('[DEBUG] Successfully joined match');
         }
       } catch (err: any) {
-        console.error('Error joining match:', err);
+        console.error('[DEBUG] Error joining match:', err);
+        console.error('[DEBUG] Error code:', err.code);
+        console.error('[DEBUG] Error message:', err.message);
         setError(err.message || 'Failed to join match');
         setLoading(false);
       }

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useQuestions } from '../context/QuestionsContext';
-import { createGame, createMatchHistory, updatePlayerStats, getPlayer, getUser } from '../services/firestore';
+import { createGame, createMatchHistory, updatePlayerStats, getPlayer, getUser, getGame, getMatchHistoriesByGameId, updateGame, createNotification, getTeam } from '../services/firestore';
 import { Question, MatchHistory } from '../types/firebase';
 import { Bolt, ArrowLeft } from 'lucide-react';
 import { auth } from '../config/firebase';
@@ -20,6 +21,8 @@ interface PracticeModeProps {
   numQuestions: number;
   practiceMode: string;
   gameSettings: { questionTime: number; hesitationTime: number; wpm: number };
+  matchGameId?: string; // Optional: if provided, use this gameId instead of creating a new one
+  matchQuestions?: Question[]; // Optional: if provided, use these questions instead of loading from context
 }
 
 export const PracticeMode: React.FC<PracticeModeProps> = ({
@@ -27,7 +30,10 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   numQuestions,
   practiceMode,
   gameSettings,
+  matchGameId,
+  matchQuestions,
 }) => {
+  const navigate = useNavigate();
   const { userData, currentUser, loading: authLoading } = useAuth();
   const { questions: allQuestions, loading: questionsLoading } = useQuestions();
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -55,11 +61,17 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
   const [hesitationComplete, setHesitationComplete] = useState(false);
   const revealIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Load match questions if provided, otherwise load from context
   useEffect(() => {
-    if (!questionsLoading && allQuestions.length > 0) {
+    if (matchQuestions && matchGameId) {
+      // Use match questions and gameId
+      setQuestions(matchQuestions);
+      setGameId(matchGameId);
+      setLoading(false);
+    } else if (!questionsLoading && allQuestions.length > 0) {
       loadQuestions();
     }
-  }, [questionsLoading, allQuestions, practiceMode, numQuestions]);
+  }, [questionsLoading, allQuestions, practiceMode, numQuestions, matchQuestions, matchGameId]);
 
   // Update timer when gameSettings change (if no question is active)
   useEffect(() => {
@@ -509,11 +521,14 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
     // Use finalScore if provided (to ensure last question score is included), otherwise use current state
     const finalPlayerScore = finalScore !== undefined ? finalScore : playerScore;
 
+    // Determine if this is a match or practice based on whether matchGameId was provided
+    const gameType = matchGameId ? 'match' : 'practice';
+    
     const matchHistory: Omit<MatchHistory, 'id' | 'startedAt' | 'completedAt'> = {
       gameId,
       playerId: playerId, // Use currentUser.uid to match request.auth.uid
       teamId: userData.teamId,
-      type: 'practice',
+      type: gameType,
       score: finalPlayerScore,
       total: questions.length,
       avgBuzzTime: parseFloat(avgBuzzTime.toFixed(2)),
@@ -704,8 +719,217 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({
       
       console.log('Player stats updated successfully!');
 
-      alert(`Practice Complete! Final Score: ${finalPlayerScore}/${questions.length}`);
-      onBack();
+      // If this is a match (not practice), check if all players have completed
+      if (matchGameId && gameType === 'match') {
+        try {
+          // Get the game to check player list
+          const gameData = await getGame(matchGameId);
+          if (!gameData) {
+            console.error('Game data not found for match:', matchGameId);
+            throw new Error('Game not found');
+          }
+          
+          if (!gameData.playerIds || gameData.playerIds.length === 0) {
+            console.error('No playerIds found in game data');
+            throw new Error('No players in match');
+          }
+          
+          // Include current player in completed set since we just created their match history
+          const completedPlayerIds = new Set([playerId]);
+          
+          // Get all match histories for this game (with retry to account for eventual consistency)
+          let allMatchHistories: MatchHistory[] = [];
+          try {
+            allMatchHistories = await getMatchHistoriesByGameId(matchGameId);
+          } catch (err) {
+            console.warn('Error fetching match histories, will retry:', err);
+          }
+          
+          // Add all players from match histories to completed set
+          allMatchHistories.forEach(mh => completedPlayerIds.add(mh.playerId));
+          
+          // If we don't see the current player's match history yet, wait a bit and retry
+          // This handles Firestore's eventual consistency
+          if (!allMatchHistories.some(mh => mh.playerId === playerId)) {
+            console.log('Match history not yet visible in query, waiting and retrying...');
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+            try {
+              allMatchHistories = await getMatchHistoriesByGameId(matchGameId);
+              allMatchHistories.forEach(mh => completedPlayerIds.add(mh.playerId));
+            } catch (err) {
+              console.warn('Error on retry fetching match histories:', err);
+              // Continue anyway since we already have current player in the set
+            }
+          }
+          
+          // Check if all players have completed
+          // Since we always include the current player, if there's only one player, this will be true
+          const allPlayersCompleted = gameData.playerIds.every(pId => completedPlayerIds.has(pId));
+          
+          console.log('Match completion check:', {
+            gameId: matchGameId,
+            currentPlayerId: playerId,
+            totalPlayers: gameData.playerIds.length,
+            playerIds: gameData.playerIds,
+            completedPlayers: Array.from(completedPlayerIds),
+            allPlayersCompleted,
+            gameStatus: gameData.status,
+            matchHistoriesFound: allMatchHistories.length
+          });
+          
+          if (allPlayersCompleted) {
+            if (gameData.status !== 'completed') {
+              // All players completed - update game status and send notifications
+              console.log('All players completed! Completing match and sending notifications...');
+              await updateGame(matchGameId, {
+                status: 'completed',
+                endedAt: new Date(),
+              });
+              
+              // Get team info to find coach
+              let coachId: string | undefined;
+              try {
+                if (gameData.teamId) {
+                  const team = await getTeam(gameData.teamId);
+                  coachId = team?.coachId;
+                } else if (gameData.coachId) {
+                  coachId = gameData.coachId;
+                }
+              } catch (err) {
+                console.warn('Error fetching team/coach info:', err);
+              }
+              
+              // Create notification for coach
+              if (coachId) {
+                try {
+                  await createNotification({
+                    userId: coachId,
+                    type: 'match_end',
+                    title: 'End of Match',
+                    message: `Match ${gameData.matchIdCode || matchGameId.substring(0, 6).toUpperCase()} has ended. All players have completed.`,
+                    gameId: matchGameId,
+                    teamId: gameData.teamId || userData.teamId,
+                    read: false,
+                  });
+                } catch (err) {
+                  console.warn('Error creating coach notification:', err);
+                }
+              }
+              
+              // Create notifications for all students
+              for (const pId of gameData.playerIds) {
+                try {
+                  await createNotification({
+                    userId: pId,
+                    type: 'match_end',
+                    title: 'End of Match',
+                    message: `Match ${gameData.matchIdCode || matchGameId.substring(0, 6).toUpperCase()} has ended. View your results!`,
+                    gameId: matchGameId,
+                    teamId: gameData.teamId || userData.teamId,
+                    read: false,
+                  });
+                } catch (err) {
+                  console.warn(`Error creating notification for player ${pId}:`, err);
+                }
+              }
+            }
+            
+            // Navigate to match results (whether we just completed it or it was already completed)
+            console.log('Navigating to match results...');
+            navigate(`/match-results?gameId=${matchGameId}`);
+            return;
+          } else {
+            console.log('Not all players completed yet:', {
+              total: gameData.playerIds.length,
+              completed: completedPlayerIds.size,
+              missing: gameData.playerIds.filter(id => !completedPlayerIds.has(id))
+            });
+          }
+        } catch (error: any) {
+          console.error('Error checking match completion:', error);
+          console.error('Error details:', {
+            message: error?.message,
+            code: error?.code,
+            stack: error?.stack
+          });
+          // If there's an error, we can't determine completion status
+          // But since we know the current player just completed, if there's only one player,
+          // we should still complete the match
+          try {
+            const gameData = await getGame(matchGameId);
+            if (gameData && gameData.playerIds && gameData.playerIds.length === 1 && gameData.playerIds[0] === playerId) {
+              // Only one player and it's the current player - complete the match
+              console.log('Single player match detected, completing despite error...');
+              await updateGame(matchGameId, {
+                status: 'completed',
+                endedAt: new Date(),
+              });
+              
+              // Get coach and send notifications
+              let coachId: string | undefined;
+              if (gameData.teamId) {
+                const team = await getTeam(gameData.teamId);
+                coachId = team?.coachId;
+              } else if (gameData.coachId) {
+                coachId = gameData.coachId;
+              }
+              
+              if (coachId) {
+                await createNotification({
+                  userId: coachId,
+                  type: 'match_end',
+                  title: 'End of Match',
+                  message: `Match ${gameData.matchIdCode || matchGameId.substring(0, 6).toUpperCase()} has ended.`,
+                  gameId: matchGameId,
+                  teamId: gameData.teamId || userData.teamId,
+                  read: false,
+                });
+              }
+              
+              await createNotification({
+                userId: playerId,
+                type: 'match_end',
+                title: 'End of Match',
+                message: `Match ${gameData.matchIdCode || matchGameId.substring(0, 6).toUpperCase()} has ended. View your results!`,
+                gameId: matchGameId,
+                teamId: gameData.teamId || userData.teamId,
+                read: false,
+              });
+              
+              navigate(`/match-results?gameId=${matchGameId}`);
+              return;
+            }
+          } catch (fallbackError) {
+            console.error('Error in fallback completion check:', fallbackError);
+          }
+          // Continue with normal flow if we can't complete the match
+        }
+      }
+
+      // For practice mode or if not all players completed, show normal completion message
+      if (gameType === 'practice') {
+        alert(`Practice Complete! Final Score: ${finalPlayerScore}/${questions.length}`);
+        onBack();
+      } else {
+        // For matches, if we reach here, it means not all players completed yet
+        // But we should still check one more time after a short delay in case of eventual consistency
+        if (matchGameId) {
+          setTimeout(async () => {
+            try {
+              const gameData = await getGame(matchGameId);
+              if (gameData && gameData.status === 'completed') {
+                // Match was completed by another player or eventual consistency caught up, navigate to results
+                navigate(`/match-results?gameId=${matchGameId}`);
+                return;
+              }
+            } catch (error) {
+              console.error('Error checking match status:', error);
+            }
+          }, 2000); // Wait 2 seconds before showing waiting message
+        }
+        alert(`Match Complete! Final Score: ${finalPlayerScore}/${questions.length}\nWaiting for other players to finish...`);
+        onBack();
+      }
     } catch (error: any) {
       console.error('Error saving match history:', error);
       console.error('Error code:', error?.code);
